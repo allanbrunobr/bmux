@@ -13,7 +13,7 @@ pub mod zoom;
 
 use anyhow::Result;
 use crossterm::{
-    event::Event,
+    event::{Event, MouseEvent, MouseEventKind, MouseButton, EnableMouseCapture, DisableMouseCapture},
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
@@ -25,6 +25,12 @@ use keybindings::{Action, KeybindingState, key_event_to_bytes};
 use layout::ResizeDir;
 use session::Session;
 
+/// Tracks mouse drag state for pane border resizing.
+struct DragState {
+    /// If dragging, the left pane ID of the border being dragged.
+    left_pane_id: Option<usize>,
+}
+
 /// Run the TUI in local (single-process) mode.
 ///
 /// Used when `bmux` is invoked with no arguments (Story 1.1).
@@ -35,13 +41,14 @@ pub async fn run_local(session_name: &str) -> Result<()> {
     // Enter raw mode and alternate screen buffer
     enable_raw_mode()?;
     let mut stdout = std::io::stdout();
-    execute!(stdout, EnterAlternateScreen)?;
+    execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
 
     let backend = CrosstermBackend::new(std::io::stdout());
     let mut terminal = Terminal::new(backend)?;
 
     let mut session = Session::new(session_name, rows, cols)?;
     let mut keybindings = KeybindingState::new();
+    let mut drag = DragState { left_pane_id: None };
     let mut running = true;
 
     // Async keyboard event channel (spawn_blocking for crossterm reads)
@@ -76,6 +83,7 @@ pub async fn run_local(session_name: &str) -> Result<()> {
                         ev,
                         &mut session,
                         &mut keybindings,
+                        &mut drag,
                         &mut running,
                         rows,
                         cols,
@@ -87,7 +95,7 @@ pub async fn run_local(session_name: &str) -> Result<()> {
 
     // Restore terminal
     disable_raw_mode()?;
-    execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
+    execute!(terminal.backend_mut(), LeaveAlternateScreen, DisableMouseCapture)?;
     Ok(())
 }
 
@@ -95,6 +103,7 @@ fn handle_event(
     event: Event,
     session: &mut Session,
     keybindings: &mut KeybindingState,
+    drag: &mut DragState,
     running: &mut bool,
     rows: u16,
     cols: u16,
@@ -111,12 +120,47 @@ fn handle_event(
                 }
             }
         }
+        Event::Mouse(mouse) => {
+            handle_mouse(mouse, session, drag);
+        }
         Event::Resize(new_cols, new_rows) => {
             session.resize(new_rows, new_cols)?;
         }
         _ => {}
     }
     Ok(())
+}
+
+fn handle_mouse(mouse: MouseEvent, session: &mut Session, drag: &mut DragState) {
+    match mouse.kind {
+        // Click to focus pane
+        MouseEventKind::Down(MouseButton::Left) => {
+            let col = mouse.column;
+            let row = mouse.row;
+
+            // Check if clicking on a border (start drag)
+            if let Some((left_id, _right_id, _border_x)) = session.border_at(col, row) {
+                drag.left_pane_id = Some(left_id);
+            } else {
+                // Click on a pane — set focus
+                session.focus_pane_at(col, row);
+            }
+        }
+
+        // Drag to resize
+        MouseEventKind::Drag(MouseButton::Left) => {
+            if let Some(left_id) = drag.left_pane_id {
+                session.active_window().drag_border(left_id, mouse.column);
+            }
+        }
+
+        // Release drag
+        MouseEventKind::Up(MouseButton::Left) => {
+            drag.left_pane_id = None;
+        }
+
+        _ => {}
+    }
 }
 
 fn handle_action(

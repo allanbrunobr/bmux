@@ -103,6 +103,51 @@ impl Window {
         }
     }
 
+    /// Find which pane contains the given screen coordinates.
+    /// Returns the pane ID if found.
+    pub fn pane_at(&self, col: u16, row: u16) -> Option<usize> {
+        let rects = self.layout.compute_rects(self.last_area);
+        for (id, rect) in &rects {
+            if col >= rect.x && col < rect.x + rect.width
+                && row >= rect.y && row < rect.y + rect.height
+            {
+                return Some(*id);
+            }
+        }
+        None
+    }
+
+    /// Check if a screen position is on a vertical border between panes.
+    /// Returns the pane IDs on left and right of the border, plus the border X.
+    pub fn border_at(&self, col: u16, row: u16) -> Option<(usize, usize, u16)> {
+        let rects = self.layout.compute_rects(self.last_area);
+        // A vertical border is at the right edge of a pane
+        for (id_left, rect_l) in &rects {
+            let border_x = rect_l.x + rect_l.width;
+            // Click within 1 column of the border
+            if col >= border_x.saturating_sub(1) && col <= border_x
+                && row >= rect_l.y && row < rect_l.y + rect_l.height
+            {
+                // Find the pane on the right side of this border
+                for (id_right, rect_r) in &rects {
+                    if rect_r.x == border_x
+                        && row >= rect_r.y && row < rect_r.y + rect_r.height
+                    {
+                        return Some((*id_left, *id_right, border_x));
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    /// Set focus to a specific pane by ID.
+    pub fn set_focus(&mut self, pane_id: usize) {
+        if self.panes.iter().any(|p| p.id == pane_id) {
+            self.focused_pane = pane_id;
+        }
+    }
+
     /// Cycle focus to the next pane (Ctrl-b o).
     pub fn focus_next_pane(&mut self) {
         if self.panes.is_empty() {
@@ -117,6 +162,16 @@ impl Window {
 
     pub fn resize_pane(&mut self, dir: ResizeDir) {
         self.layout.resize_pane(self.focused_pane, dir);
+    }
+
+    /// Set the horizontal split ratio for a border drag.
+    /// `left_pane_id` is the pane on the left side of the dragged border.
+    /// `mouse_x` is the current mouse column position.
+    pub fn drag_border(&mut self, left_pane_id: usize, mouse_x: u16) {
+        let area = self.last_area;
+        if area.width == 0 { return; }
+        let ratio = (mouse_x.saturating_sub(area.x)) as f32 / area.width as f32;
+        self.layout.set_hsplit_ratio_for(left_pane_id, ratio);
     }
 
     // ── Input forwarding ──────────────────────────────────────────────────────

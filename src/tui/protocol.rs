@@ -20,6 +20,10 @@ pub enum ClientMessage {
     Action { action: Action },
     /// Request a full state snapshot (used on initial connect).
     GetState,
+    /// Mouse click at (col, row) — server handles focus change.
+    MouseClick { col: u16, row: u16 },
+    /// Mouse drag at (col, row) with left pane ID for border resize.
+    MouseDrag { col: u16, row: u16 },
 
     // ── CLI query messages (non-TUI clients) ──────────────────────────────
     /// List all agents in this session.

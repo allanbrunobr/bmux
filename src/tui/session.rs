@@ -45,6 +45,23 @@ impl Session {
         &mut self.windows[self.active_window]
     }
 
+    /// Find which pane contains the given screen coordinates and set focus.
+    /// Returns true if a pane was found and focused.
+    pub fn focus_pane_at(&mut self, col: u16, row: u16) -> bool {
+        let win = &self.windows[self.active_window];
+        if let Some(pane_id) = win.pane_at(col, row) {
+            self.windows[self.active_window].set_focus(pane_id);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Check if a position is on a pane border in the active window.
+    pub fn border_at(&self, col: u16, row: u16) -> Option<(usize, usize, u16)> {
+        self.windows[self.active_window].border_at(col, row)
+    }
+
     /// Split the active window horizontally and launch a command in the new pane.
     /// Returns the new pane ID. Used by agent spawn to create agent panes.
     pub fn split_and_run_command(&mut self, command: &str) -> Result<usize> {
