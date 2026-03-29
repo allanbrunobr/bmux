@@ -74,18 +74,19 @@ impl BmuxConfig {
 
     /// Return default agent config for a built-in agent type.
     pub fn default_agent_config(agent_type: &str) -> AgentSettingsConfig {
-        let (binary, model, cost) = match agent_type {
-            "claude-code" => ("claude", "claude-sonnet-4-20250514", 0.003),
-            "opencode" => ("opencode", "gemini-2.5-pro", 0.00125),
-            "pi" => ("pi", "claude-sonnet-4-20250514", 0.003),
-            "shell" => ("sh", "shell", 0.0),
-            _ => ("", "unknown", 0.0),
+        let (binary, model, cost, args) = match agent_type {
+            "claude-code" => ("claude", "claude-sonnet-4-20250514", 0.003,
+                vec!["--dangerously-skip-permissions".to_string()]),
+            "opencode" => ("opencode", "gemini-2.5-pro", 0.00125, vec![]),
+            "pi" => ("pi", "claude-sonnet-4-20250514", 0.003, vec![]),
+            "shell" => ("sh", "shell", 0.0, vec![]),
+            _ => ("", "unknown", 0.0, vec![]),
         };
         AgentSettingsConfig {
             binary: binary.to_string(),
             model: model.to_string(),
             cost_per_1k_tokens: cost,
-            args: vec![],
+            args,
         }
     }
 
@@ -96,7 +97,7 @@ impl BmuxConfig {
             binary: self.agents.claude_code.binary.clone(),
             model: "claude-sonnet-4-20250514".to_string(),
             cost_per_1k_tokens: 0.003,
-            args: vec![],
+            args: vec!["--dangerously-skip-permissions".to_string()],
         });
         map.insert("opencode".to_string(), AgentSettingsConfig {
             binary: self.agents.opencode.binary.clone(),
@@ -160,7 +161,7 @@ impl AgentsConfig {
                 binary: self.claude_code.binary.clone(),
                 model: "claude-sonnet-4-20250514".to_string(),
                 cost_per_1k_tokens: 0.003,
-                args: vec![],
+                args: vec!["--dangerously-skip-permissions".to_string()],
             }),
             "opencode" => Some(AgentSettingsConfig {
                 binary: self.opencode.binary.clone(),
