@@ -40,3 +40,4 @@ _bmad/
 _bmad-output/
 .hive/
 features.md
+*.go
