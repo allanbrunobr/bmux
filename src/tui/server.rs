@@ -20,6 +20,8 @@ use crate::agents::adapter::AgentConfig;
 use crate::agents::registry::AgentRegistry;
 use crate::agents::commands::agent_type_icon;
 use crate::config::settings::BmuxConfig;
+use crate::orchestration::message_bus::MessageBus;
+use crate::orchestration::task_router::{self, TaskRouter};
 use crate::storage::context_store::ContextStore;
 
 use super::{
@@ -36,6 +38,9 @@ struct DaemonState {
     session: Mutex<Session>,
     agents: Mutex<AgentRegistry>,
     context: ContextStore,
+    task_router: TaskRouter,
+    session_name: String,
+    ipc_socket_path: PathBuf,
 }
 
 pub struct DaemonServer {
@@ -56,12 +61,19 @@ impl DaemonServer {
         let context = ContextStore::open(name, &ctx_path)
             .map_err(|e| anyhow::anyhow!("Failed to open context store: {e}"))?;
 
+        let bus = Arc::new(MessageBus::new(name)?);
+        let ipc_socket_path = bus.socket_path().clone();
+        let task_router = TaskRouter::new(bus, 300);
+
         Ok(Self {
             name: name.to_string(),
             state: Arc::new(DaemonState {
                 session: Mutex::new(session),
                 agents: Mutex::new(AgentRegistry::new()),
                 context,
+                task_router,
+                session_name: name.to_string(),
+                ipc_socket_path,
             }),
             socket_path: socket_path(name),
             meta_path: meta_path(name),
@@ -341,21 +353,41 @@ async fn handle_client_message(
                 args: settings_config.args,
             };
             if let Some(m) = model {
-                config.model = m;
+                config.model = m.clone();
             }
 
-            // Verify binary exists
+            // Verify binary exists (skip for shell — uses $SHELL)
             if agent_type != "shell" && which::which(&config.binary).is_err() {
                 let data = format!("Error: Agent binary '{}' not found in PATH", config.binary);
                 return Ok(HandleResult::Reply(ServerMessage::QueryResult { data }));
             }
 
             let icon = agent_type_icon(&agent_type);
+            let cost = config.cost_per_1k_tokens;
+            let model_name = config.model.clone();
             reg.register(&name, &agent_type, config);
 
-            // TODO: also create a pane in the session for the agent's PTY
+            // Register agent in TaskRouter for auto-routing
+            state.task_router.register_agent(task_router::AgentInfo {
+                id: name.clone(),
+                agent_type: agent_type.clone(),
+                model_name: model_name.clone(),
+                cost_per_1k_tokens: cost,
+                capabilities: vec![],
+                idle_since: Some(std::time::Instant::now()),
+            }).await;
 
-            let data = format!("Agent '{}' spawned successfully (pane: {} [{}])", name, icon, name);
+            let data = format!(
+                "Agent '{}' spawned successfully (pane: {} [{}])\n\
+                 Session: {}\n\
+                 IPC socket: {}\n\
+                 Env injected: BMUX_SESSION={}, BMUX_SOCKET={}",
+                name, icon, name,
+                state.session_name,
+                state.ipc_socket_path.display(),
+                state.session_name,
+                state.ipc_socket_path.display(),
+            );
             return Ok(HandleResult::Reply(ServerMessage::QueryResult { data }));
         }
 
@@ -407,31 +439,91 @@ async fn handle_client_message(
         ClientMessage::AgentKill { name } => {
             let mut reg = state.agents.lock().await;
             let data = match reg.remove(&name) {
-                Ok(info) => format!("Agent '{}' ({}) killed.", info.name, info.agent_type),
+                Ok(info) => {
+                    // Also notify task router about crashed/killed agent
+                    state.task_router.handle_agent_crash(&name).await;
+                    format!("Agent '{}' ({}) killed.", info.name, info.agent_type)
+                }
                 Err(e) => format!("Error: {}", e),
             };
             return Ok(HandleResult::Reply(ServerMessage::QueryResult { data }));
         }
 
-        ClientMessage::TaskSend { agent, content, model: _ } => {
-            // TODO: integrate TaskRouter — for now acknowledge receipt
-            let target = agent.unwrap_or_else(|| "auto-route".to_string());
-            let data = format!("Task queued for '{}': {}", target, content);
+        ClientMessage::TaskSend { agent, content, model } => {
+            let data = if let Some(agent_name) = agent {
+                // Direct send to named agent
+                match state.task_router.send_to_agent(&agent_name, &content, 1).await {
+                    Ok(task_router::SendResult::Dispatched { task_id }) => {
+                        format!("Task queued → routed to: {} (task_id: {})", agent_name, task_id)
+                    }
+                    Ok(task_router::SendResult::Queued { task_id, agent_id, position }) => {
+                        format!("Agent '{}' busy — task queued (position: {}, task_id: {})", agent_id, position, task_id)
+                    }
+                    Err(e) => format!("Error: {}", e),
+                }
+            } else {
+                // Auto-route to best available agent
+                match state.task_router.send_auto(&content, model.as_deref(), None).await {
+                    Ok(task_router::AutoRouteResult::Dispatched { task_id, agent_id, estimated_cost }) => {
+                        format!(
+                            "Task queued → auto-routed to: {} (estimated cost: ${:.6}, task_id: {})",
+                            agent_id, estimated_cost, task_id
+                        )
+                    }
+                    Ok(task_router::AutoRouteResult::AllBusy { task_id, timeout_seconds }) => {
+                        format!(
+                            "All agents busy — task queued (timeout: {}s, task_id: {})",
+                            timeout_seconds, task_id
+                        )
+                    }
+                    Err(e) => format!("Error: {}", e),
+                }
+            };
             return Ok(HandleResult::Reply(ServerMessage::QueryResult { data }));
         }
 
         ClientMessage::TaskList => {
-            let data = "No tasks in queue.".to_string();
+            let tasks = state.task_router.list_tasks().await;
+            let data = if tasks.is_empty() {
+                "No tasks.".to_string()
+            } else {
+                let mut lines = vec![format!(
+                    "{:<10} {:<15} {:<12} {}",
+                    "ID", "AGENT", "STATUS", "SUBMITTED"
+                )];
+                for t in &tasks {
+                    lines.push(format!(
+                        "{:<10} {:<15} {:<12} {}",
+                        t.id, t.destination, t.status,
+                        t.submitted_at.format("%H:%M:%S"),
+                    ));
+                }
+                lines.join("\n")
+            };
             return Ok(HandleResult::Reply(ServerMessage::QueryResult { data }));
         }
 
         ClientMessage::TaskCancel { id } => {
-            let data = format!("Task '{}' cancelled.", id);
+            let data = match state.task_router.cancel_task(&id).await {
+                Ok(task_router::CancelResult::Cancelled) => format!("Task '{}' cancelled.", id),
+                Ok(task_router::CancelResult::AlreadyActive) => {
+                    format!("Error: Task '{}' is already in progress — cannot cancel.", id)
+                }
+                Err(e) => format!("Error: {}", e),
+            };
             return Ok(HandleResult::Reply(ServerMessage::QueryResult { data }));
         }
 
         ClientMessage::TaskStatus { id } => {
-            let data = format!("Task '{}': no status available.", id);
+            let data = match state.task_router.task_status(&id).await {
+                Some(task) => format!(
+                    "Task: {}\nAgent: {}\nStatus: {}\nSubmitted: {}\nContent: {}",
+                    task.id, task.destination, task.status,
+                    task.submitted_at.format("%Y-%m-%d %H:%M:%S"),
+                    task.content,
+                ),
+                None => format!("Task '{}' not found.", id),
+            };
             return Ok(HandleResult::Reply(ServerMessage::QueryResult { data }));
         }
 
