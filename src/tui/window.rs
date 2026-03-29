@@ -176,8 +176,17 @@ impl Window {
         self.panes.iter().find(|p| p.id == id)
     }
 
-    fn pane_mut(&mut self, id: usize) -> Option<&mut Pane> {
+    /// Get a mutable reference to a pane by ID.
+    pub fn pane_mut(&mut self, id: usize) -> Option<&mut Pane> {
         self.panes.iter_mut().find(|p| p.id == id)
+    }
+
+    /// Send input bytes to a specific pane (not necessarily the focused one).
+    pub fn send_input_to_pane(&mut self, pane_id: usize, bytes: &[u8]) -> Result<()> {
+        if let Some(pane) = self.pane_mut(pane_id) {
+            pane.send_input(bytes)?;
+        }
+        Ok(())
     }
 
     fn focused_inner_size(&self) -> (u16, u16) {
