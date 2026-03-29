@@ -196,8 +196,7 @@ impl Window {
     pub fn drag_border(&mut self, left_pane_id: usize, mouse_x: u16) {
         let area = self.last_area;
         if area.width == 0 { return; }
-        let ratio = (mouse_x.saturating_sub(area.x)) as f32 / area.width as f32;
-        self.layout.set_hsplit_ratio_for(left_pane_id, ratio);
+        self.layout.set_hsplit_ratio_at(left_pane_id, mouse_x, area);
     }
 
     // ── Input forwarding ──────────────────────────────────────────────────────
