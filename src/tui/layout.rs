@@ -226,19 +226,35 @@ impl Layout {
 
     /// Set the split ratio of an HSplit that contains the given left pane.
     /// `ratio` is clamped to [0.1, 0.9].
-    pub fn set_hsplit_ratio_for(&mut self, left_pane_id: usize, new_ratio: f32) {
+    /// Set the split ratio for the HSplit whose **direct left child** contains
+    /// `left_pane_id`. The ratio is relative to this node's area, not the root.
+    ///
+    /// `mouse_x` and `area` are used to compute the correct ratio for nested splits.
+    pub fn set_hsplit_ratio_at(&mut self, left_pane_id: usize, mouse_x: u16, area: Rect) {
         match self {
             Layout::Leaf(_) => {}
-            Layout::HSplit { left, right: _, ratio } => {
+            Layout::HSplit { left, right, ratio } => {
                 if left.contains(left_pane_id) {
-                    *ratio = new_ratio.clamp(0.1, 0.9);
+                    // This is the target split — compute ratio relative to THIS node's area
+                    if area.width > 0 {
+                        let new_ratio = (mouse_x.saturating_sub(area.x)) as f32 / area.width as f32;
+                        *ratio = new_ratio.clamp(0.1, 0.9);
+                    }
                     return;
                 }
-                left.set_hsplit_ratio_for(left_pane_id, new_ratio);
+                // Recurse into both subtrees with their computed sub-areas
+                let split = (area.width as f32 * *ratio) as u16;
+                let left_area = Rect::new(area.x, area.y, split.max(1), area.height);
+                let right_area = Rect::new(area.x + split, area.y, area.width.saturating_sub(split), area.height);
+                left.set_hsplit_ratio_at(left_pane_id, mouse_x, left_area);
+                right.set_hsplit_ratio_at(left_pane_id, mouse_x, right_area);
             }
-            Layout::VSplit { top, bottom, .. } => {
-                top.set_hsplit_ratio_for(left_pane_id, new_ratio);
-                bottom.set_hsplit_ratio_for(left_pane_id, new_ratio);
+            Layout::VSplit { top, bottom, ratio: r } => {
+                let split = (area.height as f32 * *r) as u16;
+                let top_area = Rect::new(area.x, area.y, area.width, split.max(1));
+                let bot_area = Rect::new(area.x, area.y + split, area.width, area.height.saturating_sub(split));
+                top.set_hsplit_ratio_at(left_pane_id, mouse_x, top_area);
+                bottom.set_hsplit_ratio_at(left_pane_id, mouse_x, bot_area);
             }
         }
     }
