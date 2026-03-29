@@ -155,6 +155,17 @@ pub async fn run_client(socket: PathBuf) -> Result<()> {
                             )? + "\n";
                             write_half.write_all(msg.as_bytes()).await?;
                         }
+                        MouseEventKind::Drag(MouseButton::Left)
+                        | MouseEventKind::Moved => {
+                            let msg = serde_json::to_string(
+                                &ClientMessage::MouseDrag { col: mouse.column, row: mouse.row }
+                            )? + "\n";
+                            write_half.write_all(msg.as_bytes()).await?;
+                        }
+                        MouseEventKind::Up(MouseButton::Left) => {
+                            // Send a final click to end drag on server
+                            // (server clears drag state on next click)
+                        }
                         _ => {}
                     }
                 }
