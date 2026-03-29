@@ -199,6 +199,12 @@ async fn handle_client(
             let json = serde_json::to_string(&response)? + "\n";
             write_half.write_all(json.as_bytes()).await?;
         }
+
+        // CLI queries that mutate session state (AgentSpawn, AgentKill)
+        // must broadcast updated snapshot to all TUI clients.
+        let snap = build_snapshot(&*state.session.lock().await);
+        let _ = broadcast_tx.send(Arc::new(ServerMessage::State(snap)));
+
         // Close connection — CLI clients are one-shot
         return Ok(());
     }
@@ -363,12 +369,14 @@ async fn handle_client_message(
         // ═══════════════════════════════════════════════════════════════════
 
         ClientMessage::AgentSpawn { agent_type, name, model } => {
-            let mut reg = state.agents.lock().await;
-
-            if reg.get(&name).is_some() {
-                let data = format!("Error: Agent '{}' already exists.", name);
-                return Ok(HandleResult::Reply(ServerMessage::QueryResult { data }));
-            }
+            // Check for duplicate name (short lock)
+            {
+                let reg = state.agents.lock().await;
+                if reg.get(&name).is_some() {
+                    let data = format!("Error: Agent '{}' already exists.", name);
+                    return Ok(HandleResult::Reply(ServerMessage::QueryResult { data }));
+                }
+            } // agents lock dropped here
 
             let bmux_config = BmuxConfig::load().unwrap_or_default();
             let settings_config = bmux_config
@@ -386,22 +394,19 @@ async fn handle_client_message(
                 config.model = m.clone();
             }
 
-            // Verify binary exists (skip for shell — uses $SHELL)
             if agent_type != "shell" && which::which(&config.binary).is_err() {
                 let data = format!("Error: Agent binary '{}' not found in PATH", config.binary);
                 return Ok(HandleResult::Reply(ServerMessage::QueryResult { data }));
             }
 
-            // Build the command to launch inside the pane's shell
+            // Build shell command
             let mut agent_cmd = String::new();
-            // Export BMUX env vars into the pane's shell
             agent_cmd.push_str(&format!(
                 "export BMUX_SESSION='{}' BMUX_SOCKET='{}' BMUX_AGENT_NAME='{}'; ",
                 state.session_name,
                 state.ipc_socket_path.display(),
                 name,
             ));
-            // The actual agent binary + args
             agent_cmd.push_str(&config.binary);
             for arg in &config.args {
                 agent_cmd.push(' ');
@@ -412,7 +417,7 @@ async fn handle_client_message(
                 agent_cmd.push_str(&config.model);
             }
 
-            // Split the active window and launch the agent in the new pane
+            // Split window — session lock acquired and released in this block
             let pane_id = {
                 let mut sess = state.session.lock().await;
                 match sess.split_and_run_command(&agent_cmd) {
@@ -422,19 +427,22 @@ async fn handle_client_message(
                         return Ok(HandleResult::Reply(ServerMessage::QueryResult { data }));
                     }
                 }
-            };
+            }; // session lock dropped here
 
             let icon = agent_type_icon(&agent_type);
             let cost = config.cost_per_1k_tokens;
             let model_name = config.model.clone();
 
-            // Register in AgentRegistry with pane_id
-            reg.register(&name, &agent_type, config);
-            if let Some(info) = reg.get_mut(&name) {
-                info.pane_id = Some(pane_id);
-            }
+            // Register — agents lock acquired here (after session lock released)
+            {
+                let mut reg = state.agents.lock().await;
+                reg.register(&name, &agent_type, config);
+                if let Some(info) = reg.get_mut(&name) {
+                    info.pane_id = Some(pane_id);
+                }
+            } // agents lock dropped here
 
-            // Register in TaskRouter for auto-routing
+            // Register in TaskRouter (no lock contention)
             state.task_router.register_agent(task_router::AgentInfo {
                 id: name.clone(),
                 agent_type: agent_type.clone(),
