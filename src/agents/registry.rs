@@ -45,6 +45,7 @@ pub struct AgentInfo {
     pub task_count: u64,
     pub last_task: Option<String>,
     pub spawned_at: Instant,
+    pub pid: Option<u32>,
 }
 
 impl AgentInfo {
@@ -62,6 +63,7 @@ impl AgentInfo {
             task_count: 0,
             last_task: None,
             spawned_at: Instant::now(),
+            pid: None,
         }
     }
 
