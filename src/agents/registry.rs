@@ -46,6 +46,8 @@ pub struct AgentInfo {
     pub last_task: Option<String>,
     pub spawned_at: Instant,
     pub pid: Option<u32>,
+    /// TUI pane ID where this agent's PTY is running.
+    pub pane_id: Option<usize>,
 }
 
 impl AgentInfo {
@@ -64,6 +66,7 @@ impl AgentInfo {
             last_task: None,
             spawned_at: Instant::now(),
             pid: None,
+            pane_id: None,
         }
     }
 
