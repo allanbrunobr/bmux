@@ -99,6 +99,17 @@ impl Session {
         self.active_window().send_input(bytes)
     }
 
+    /// Send input to a specific pane by ID (searches all windows).
+    /// Used by task send to deliver prompts to agent panes.
+    pub fn send_input_to_pane(&mut self, pane_id: usize, bytes: &[u8]) -> Result<()> {
+        for window in &mut self.windows {
+            if window.pane_mut(pane_id).is_some() {
+                return window.send_input_to_pane(pane_id, bytes);
+            }
+        }
+        anyhow::bail!("Pane {} not found in any window", pane_id)
+    }
+
     // ── Resize ────────────────────────────────────────────────────────────────
 
     pub fn resize(&mut self, rows: u16, cols: u16) -> Result<()> {

@@ -400,8 +400,11 @@ async fn handle_client_message(
             let cost = config.cost_per_1k_tokens;
             let model_name = config.model.clone();
 
-            // Register in AgentRegistry
+            // Register in AgentRegistry with pane_id
             reg.register(&name, &agent_type, config);
+            if let Some(info) = reg.get_mut(&name) {
+                info.pane_id = Some(pane_id);
+            }
 
             // Register in TaskRouter for auto-routing
             state.task_router.register_agent(task_router::AgentInfo {
@@ -487,35 +490,49 @@ async fn handle_client_message(
         }
 
         ClientMessage::TaskSend { agent, content, model } => {
-            let data = if let Some(agent_name) = agent {
+            // Determine the target agent name (direct or auto-routed)
+            let (data, target_agent) = if let Some(ref agent_name) = agent {
                 // Direct send to named agent
-                match state.task_router.send_to_agent(&agent_name, &content, 1).await {
+                match state.task_router.send_to_agent(agent_name, &content, 1).await {
                     Ok(task_router::SendResult::Dispatched { task_id }) => {
-                        format!("Task queued → routed to: {} (task_id: {})", agent_name, task_id)
+                        (format!("Task dispatched → {agent_name} (task_id: {task_id})"),
+                         Some(agent_name.clone()))
                     }
                     Ok(task_router::SendResult::Queued { task_id, agent_id, position }) => {
-                        format!("Agent '{}' busy — task queued (position: {}, task_id: {})", agent_id, position, task_id)
+                        (format!("Agent '{agent_id}' busy — task queued (position: {position}, task_id: {task_id})"),
+                         None) // queued, don't deliver to PTY yet
                     }
-                    Err(e) => format!("Error: {}", e),
+                    Err(e) => (format!("Error: {e}"), None),
                 }
             } else {
                 // Auto-route to best available agent
                 match state.task_router.send_auto(&content, model.as_deref(), None).await {
                     Ok(task_router::AutoRouteResult::Dispatched { task_id, agent_id, estimated_cost }) => {
-                        format!(
-                            "Task queued → auto-routed to: {} (estimated cost: ${:.6}, task_id: {})",
-                            agent_id, estimated_cost, task_id
-                        )
+                        (format!("Task auto-routed → {agent_id} (cost: ${estimated_cost:.6}, task_id: {task_id})"),
+                         Some(agent_id))
                     }
                     Ok(task_router::AutoRouteResult::AllBusy { task_id, timeout_seconds }) => {
-                        format!(
-                            "All agents busy — task queued (timeout: {}s, task_id: {})",
-                            timeout_seconds, task_id
-                        )
+                        (format!("All agents busy — queued (timeout: {timeout_seconds}s, task_id: {task_id})"),
+                         None)
                     }
-                    Err(e) => format!("Error: {}", e),
+                    Err(e) => (format!("Error: {e}"), None),
                 }
             };
+
+            // Deliver the task content to the agent's pane PTY stdin
+            if let Some(target) = target_agent {
+                let reg = state.agents.lock().await;
+                if let Some(info) = reg.get(&target) {
+                    if let Some(pane_id) = info.pane_id {
+                        let mut sess = state.session.lock().await;
+                        let input = format!("{}\n", content);
+                        if let Err(e) = sess.send_input_to_pane(pane_id, input.as_bytes()) {
+                            tracing::warn!(agent = %target, pane = pane_id, "Failed to deliver task to PTY: {e}");
+                        }
+                    }
+                }
+            }
+
             return Ok(HandleResult::Reply(ServerMessage::QueryResult { data }));
         }
 

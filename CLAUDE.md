@@ -1,46 +1,67 @@
-# BMUX Agent Integration
+# BMUX — Agent Integration Guide
 
-When running inside a BMUX session, you have access to the multi-agent
-communication layer. Use these commands to collaborate with other agents.
+You are running inside BMUX, a terminal multiplexer for AI agents.
+BMUX allows multiple AI agents to share context, delegate tasks, and
+collaborate in real time through a shared context store and message bus.
 
-## Environment Variables
+## Your identity
 
-- `BMUX_SESSION` — name of the current session
-- `BMUX_SOCKET` — path to the IPC socket
+When you start, check your environment:
+- Session name: $BMUX_SESSION
+- Your agent name: $BMUX_AGENT_NAME  
+- IPC socket: $BMUX_SOCKET
 
-## Publish Task Results
+## First thing to do when you start
 
-After completing any task, publish your result so other agents can use it:
-
-```bash
-bmux context set "task:${DESCRIPTION}:result" "${SUMMARY}" -s $BMUX_SESSION
-```
-
-## Read Other Agents' Work
-
-```bash
+Always run this first to see what other agents have discovered:
 bmux context dump -s $BMUX_SESSION
-bmux context get "task:design:result" -s $BMUX_SESSION
-```
 
-## Delegate Subtasks
+## Commands available to you
 
-```bash
-bmux task send agent-name "implement the login module" -s $BMUX_SESSION
-bmux task send --auto "write tests for auth" -s $BMUX_SESSION
-```
+### Share your results with other agents
+bmux context set "key" "value" -s $BMUX_SESSION
 
-## Check Available Agents
+### Read what other agents published
+bmux context get "key" -s $BMUX_SESSION
+bmux context dump -s $BMUX_SESSION
 
-```bash
+### See which agents are running
 bmux agent list -s $BMUX_SESSION
-bmux agent status agent-name -s $BMUX_SESSION
-```
 
-## Task Queue
+### Delegate a subtask to another agent
+bmux task send <agent-name> -s $BMUX_SESSION -- "your prompt here"
 
-```bash
+### Check pending tasks assigned to you
 bmux task list -s $BMUX_SESSION
-bmux task status TASK_ID -s $BMUX_SESSION
-bmux task cancel TASK_ID -s $BMUX_SESSION
-```
+
+## Collaboration protocol
+
+1. START: run `bmux context dump -s $BMUX_SESSION` to see existing context
+2. WORK: complete your task
+3. PUBLISH: share your result with a meaningful key
+   bmux context set "design:auth" "JWT RS256 with refresh tokens" -s $BMUX_SESSION
+4. DELEGATE: if another agent should act on your result
+   bmux task send testador -s $BMUX_SESSION -- "Implement tests for: $(bmux context get 'design:auth' -s $BMUX_SESSION)"
+5. DONE: publish completion status
+   bmux context set "status:arquiteto" "done" -s $BMUX_SESSION
+
+## Key naming convention
+
+- design:<topic>     → architecture decisions
+- task:<agent>       → pending tasks for an agent
+- status:<agent>     → current status (working/done/error)
+- result:<topic>     → completed work output
+- question:<topic>   → questions for other agents
+
+## Example multi-agent workflow
+
+Agent arquiteto:
+  bmux context set "design:auth" "JWT RS256, 1h expiry, refresh in sled KV, POST /auth/login" -s $BMUX_SESSION
+  bmux task send testador -s $BMUX_SESSION -- "Write unit tests for the auth design"
+  bmux context set "status:arquiteto" "done — waiting for testador" -s $BMUX_SESSION
+
+Agent testador:
+  bmux context get "design:auth" -s $BMUX_SESSION
+  → reads the design, writes tests
+  bmux context set "result:tests" "tests/auth_test.rs created — 12 tests, all passing" -s $BMUX_SESSION
+  bmux context set "status:testador" "done" -s $BMUX_SESSION
