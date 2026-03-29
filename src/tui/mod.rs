@@ -132,6 +132,9 @@ fn handle_event(
 }
 
 fn handle_mouse(mouse: MouseEvent, session: &mut Session, drag: &mut DragState) {
+    // Always update hover position for border highlighting
+    session.active_window().set_hover(mouse.column, mouse.row);
+
     match mouse.kind {
         // Click to focus pane
         MouseEventKind::Down(MouseButton::Left) => {

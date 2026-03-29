@@ -25,6 +25,9 @@ pub struct Window {
     next_pane_id: usize,
     /// Total area allocated to this window (updated on resize/render)
     last_area: Rect,
+    /// Current mouse hover position (for border highlight).
+    hover_col: Option<u16>,
+    hover_row: Option<u16>,
 }
 
 impl Window {
@@ -42,6 +45,8 @@ impl Window {
             focused_pane: 0,
             next_pane_id: 1,
             last_area: Rect::new(0, 0, cols, rows),
+            hover_col: None,
+            hover_row: None,
         })
     }
 
@@ -160,6 +165,27 @@ impl Window {
         }
     }
 
+    /// Update the mouse hover position. Call on every mouse move event.
+    pub fn set_hover(&mut self, col: u16, row: u16) {
+        self.hover_col = Some(col);
+        self.hover_row = Some(row);
+    }
+
+    /// Clear the mouse hover position.
+    pub fn clear_hover(&mut self) {
+        self.hover_col = None;
+        self.hover_row = None;
+    }
+
+    /// Returns true if the mouse is currently hovering over a vertical pane border.
+    fn is_hover_on_border(&self) -> bool {
+        if let (Some(col), Some(row)) = (self.hover_col, self.hover_row) {
+            self.border_at(col, row).is_some()
+        } else {
+            false
+        }
+    }
+
     pub fn resize_pane(&mut self, dir: ResizeDir) {
         self.layout.resize_pane(self.focused_pane, dir);
     }
@@ -210,12 +236,32 @@ impl Window {
 
     /// Render all panes into the frame buffer.
     pub fn render(&mut self, buf: &mut Buffer, area: Rect) {
+        use ratatui::style::{Color, Style};
+
         self.last_area = area;
         let rects = self.layout.compute_rects(area);
-        for (pane_id, rect) in rects {
-            let focused = pane_id == self.focused_pane;
-            if let Some(pane) = self.pane_ref(pane_id) {
-                pane.view(focused).render(rect, buf);
+        for (pane_id, rect) in &rects {
+            let focused = *pane_id == self.focused_pane;
+            if let Some(pane) = self.pane_ref(*pane_id) {
+                pane.view(focused).render(*rect, buf);
+            }
+        }
+
+        // Highlight vertical borders when mouse hovers on them.
+        // Draw a bright column where two panes share an edge.
+        if let (Some(hcol), Some(hrow)) = (self.hover_col, self.hover_row) {
+            if let Some((_left_id, _right_id, border_x)) = self.border_at(hcol, hrow) {
+                // Highlight the entire vertical border column
+                let border_style = Style::default()
+                    .fg(Color::Black)
+                    .bg(Color::Cyan);
+                for y in area.y..area.y + area.height {
+                    if border_x > 0 && border_x < area.x + area.width {
+                        let cell = &mut buf[(border_x - 1, y)];
+                        cell.set_style(border_style);
+                        cell.set_symbol("┃");
+                    }
+                }
             }
         }
     }
