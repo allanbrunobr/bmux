@@ -25,6 +25,10 @@ pub struct GenericCliAdapter {
     spawned_at: Option<Instant>,
     tokens_used: u64,
     cost_usd: f64,
+    /// BMUX session name — injected as BMUX_SESSION env var on spawn.
+    session_name: Option<String>,
+    /// BMUX IPC socket path — injected as BMUX_SOCKET env var on spawn.
+    socket_path: Option<String>,
 }
 
 impl GenericCliAdapter {
@@ -47,6 +51,8 @@ impl GenericCliAdapter {
             spawned_at: None,
             tokens_used: 0,
             cost_usd: 0.0,
+            session_name: None,
+            socket_path: None,
         }
     }
 
@@ -69,6 +75,17 @@ impl GenericCliAdapter {
 
     pub fn uptime_seconds(&self) -> u64 {
         self.spawned_at.map(|t| t.elapsed().as_secs()).unwrap_or(0)
+    }
+
+    /// Set BMUX session context — injected as env vars when spawning.
+    pub fn set_session_context(&mut self, session_name: &str, socket_path: &str) {
+        self.session_name = Some(session_name.to_string());
+        self.socket_path = Some(socket_path.to_string());
+    }
+
+    /// Get the child process PID, if spawned.
+    pub fn pid(&self) -> Option<u32> {
+        self.child.as_ref().map(|c| c.id().unwrap_or(0))
     }
 }
 
@@ -105,6 +122,16 @@ impl AgentAdapter for GenericCliAdapter {
         for arg in &config.args {
             cmd.arg(arg);
         }
+
+        // Inject BMUX session context so the agent can communicate
+        if let Some(ref sess) = self.session_name {
+            cmd.env("BMUX_SESSION", sess);
+        }
+        if let Some(ref sock) = self.socket_path {
+            cmd.env("BMUX_SOCKET", sock);
+        }
+        cmd.env("BMUX_AGENT_NAME", &self.id);
+
         cmd.stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::inherit());
