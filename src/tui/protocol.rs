@@ -24,6 +24,8 @@ pub enum ClientMessage {
     MouseClick { col: u16, row: u16 },
     /// Mouse drag at (col, row) with left pane ID for border resize.
     MouseDrag { col: u16, row: u16 },
+    /// Mouse button released — end drag.
+    MouseUp,
 
     // ── CLI query messages (non-TUI clients) ──────────────────────────────
     /// List all agents in this session.

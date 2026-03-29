@@ -350,6 +350,9 @@ async fn handle_client_message(
                 state.session.lock().await.active_window().drag_border(left_id, col);
             }
         }
+        ClientMessage::MouseUp => {
+            *drag_left_pane = None;
+        }
 
         // ═══════════════════════════════════════════════════════════════════
         // CLI query handlers — real implementations using daemon-owned state
