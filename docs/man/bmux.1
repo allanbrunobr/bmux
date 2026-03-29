@@ -1,0 +1,240 @@
+.\" bmux.1 — man page for BMUX
+.\" Story 7.2: README Quickstart & Man Page
+.\"
+.TH BMUX 1 "2026" "bmux 0.1.0" "User Commands"
+.\"
+.SH NAME
+bmux \- terminal multiplexer with AI agent orchestration
+.\"
+.SH SYNOPSIS
+.B bmux
+.RI [ SUBCOMMAND ]
+.RI [ OPTIONS ]
+.\"
+.SH DESCRIPTION
+.B bmux
+is a terminal multiplexer that adds first-class AI agent support to the
+familiar tmux-style workflow. It manages panes, windows, and sessions while
+simultaneously orchestrating Claude Code, OpenCode, Pi, Gemini, and custom
+CLI agents as child processes. Agents communicate via an authenticated Unix
+socket bus (HMAC-SHA256) and are sandboxed to the project directory using
+Landlock (Linux) or Seatbelt (macOS).
+.\"
+.SH SUBCOMMANDS
+.\"
+.SS Session Management
+.TP
+.B bmux new \fR[\fIname\fR]
+Start a new named session (defaults to a generated name).
+.TP
+.B bmux attach \fR[\fIname\fR]
+Reattach to an existing detached session.
+.TP
+.B bmux ls
+List all sessions with their window count and creation time.
+.TP
+.B bmux kill \fR\fIname\fR
+Terminate a session and all its agents.
+.\"
+.SS Agent Lifecycle
+.TP
+.B bmux agent spawn \fItype\fR \fB\-\-name\fR \fIname\fR
+Spawn an AI agent of the given type.
+Valid types: \fBclaude\fR, \fBopencode\fR, \fBpi\fR, \fBgemini\fR, \fBshell\fR, \fBcustom\fR.
+.TP
+.B bmux agent ls
+List all agents with their status, model, and current cost.
+.TP
+.B bmux agent status \fIname\fR
+Show detailed status for a specific agent.
+.TP
+.B bmux agent kill \fIname\fR
+Terminate a specific agent without ending the session.
+.\"
+.SS Task Routing
+.TP
+.B bmux task send \fIagent\fR \fIprompt\fR
+Send a task to the named agent. The agent must be idle or it will be queued.
+.TP
+.B bmux task ls
+List queued and in-progress tasks with status and assigned agent.
+.TP
+.B bmux task cancel \fIid\fR
+Cancel a queued (not yet started) task.
+.\"
+.SS Shared Context
+.TP
+.B bmux context get \fIkey\fR
+Read a value from the session context store.
+.TP
+.B bmux context set \fIkey\fR \fIvalue\fR
+Write a value to the session context store.
+.TP
+.B bmux context dump
+Export the entire session context as a JSON file to stdout.
+.\"
+.SS Workflow Orchestration
+.TP
+.B bmux workflow run \fIfile.yaml\fR
+Execute a workflow YAML. Steps are dispatched to agents in dependency order;
+independent steps run in parallel.
+.TP
+.B bmux workflow status \fIid\fR
+Display real-time status of a running workflow (step state, agent, cost).
+.\"
+.SS Configuration
+.TP
+.B bmux config show
+Print the effective merged configuration.
+.TP
+.B bmux config reload
+Hot-reload \fI~/.config/bmux/config.toml\fR without restarting.
+.\"
+.SS Data Management
+.TP
+.B bmux data purge
+Delete all local BMUX data: audit logs, shared context, and session state.
+Prints confirmation \fB"All BMUX local data purged"\fR on success.
+.\"
+.SH KEYBINDINGS
+The default prefix key is
+.BR Ctrl\-b .
+All key sequences below assume the prefix has been pressed first.
+.PP
+.TS
+tab(|) box;
+l | l.
+Key | Action
+_
+\\ | Split pane horizontally
+\- | Split pane vertically
+h/j/k/l | Navigate between panes (Vim-style)
+H/J/K/L | Resize pane
+z | Zoom pane (full-screen toggle)
+[ | Enter scroll/copy mode
+d | Detach from session
+c | Create new window
+n | Next window
+p | Previous window
+, | Rename current window
+t | Send task to focused agent pane
+T | Send task (auto-route to best agent)
+r | Reload configuration
+? | Show keybindings help
+.TE
+.\"
+.SH CONFIGURATION
+Configuration is read from
+.IR ~/.config/bmux/config.toml .
+.PP
+.nf
+[tui]
+default_shell = "/bin/zsh"
+prefix_key    = "ctrl-b"
+status_bar    = true
+
+[agents]
+default_type  = "claude"
+
+[security]
+sandbox       = "landlock"   # landlock | namespace | seatbelt | none
+
+[audit]
+enabled       = true
+.fi
+.\"
+.SH SECRETS
+API keys must be stored in
+.IR ~/.config/bmux/secrets.toml
+with permissions
+.B 0600
+(enforced at startup).
+.PP
+.nf
+[keys]
+anthropic = "sk-ant-..."
+openai    = "sk-..."
+.fi
+.PP
+Keys are injected into agent processes via sealed file descriptors and are
+never placed in environment variables. They are automatically redacted from
+audit log entries.
+.\"
+.SH FILES
+.TP
+.I ~/.config/bmux/config.toml
+Main configuration file.
+.TP
+.I ~/.config/bmux/secrets.toml
+API key storage (must be chmod 0600).
+.TP
+.I ~/.config/bmux/workflows/*.yaml
+Workflow definition files.
+.TP
+.I ~/.local/share/bmux/audit/YYYY\-MM\-DD.jsonl
+Structured audit log (one JSON event per line).
+.TP
+.I ~/.local/share/bmux/context/
+Shared context KV store (sled).
+.TP
+.I ~/.local/share/bmux/sessions/
+Session persistence store (sled).
+.\"
+.SH EXAMPLES
+.PP
+Start a session, spawn an agent, send it a task:
+.PP
+.nf
+bmux new my-project
+bmux agent spawn claude --name dev
+bmux task send dev "Refactor the auth module to use async/await"
+.fi
+.PP
+Use a workflow to coordinate multiple agents:
+.PP
+.nf
+bmux workflow run ~/.config/bmux/workflows/ci-pipeline.yaml
+bmux workflow status <returned-id>
+.fi
+.PP
+Export session context for debugging:
+.PP
+.nf
+bmux context dump > context-snapshot.json
+.fi
+.\"
+.SH SECURITY
+.B bmux
+applies filesystem sandboxing to each agent process:
+.IP \(bu 2
+.B Linux 5.13+:
+Landlock ruleset restricting access to the project directory and
+.IR /tmp .
+.IP \(bu 2
+.B Linux < 5.13:
+Mount-namespace isolation (reduced protection; a warning is logged).
+.IP \(bu 2
+.B macOS:
+Seatbelt (sandbox_init) with a generated SBPL profile.
+.PP
+Disable sandboxing with \fBsandbox = "none"\fR in config (not recommended;
+a warning is logged at startup).
+.\"
+.SH EXIT STATUS
+.TP
+.B 0
+Success.
+.TP
+.B 1
+General error (see stderr).
+.\"
+.SH BUGS
+Report bugs at
+.IR https://github.com/brunobsc/bmux/issues .
+.\"
+.SH SEE ALSO
+.BR tmux (1),
+.BR cargo (1)
+.\"
+.SH AUTHOR
+Bruno Oliveira Silva <bruno@example.com>

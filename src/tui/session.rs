@@ -1,0 +1,245 @@
+use anyhow::Result;
+use chrono::{DateTime, Utc};
+use ratatui::{
+    Frame,
+    layout::{Constraint, Direction, Layout as RatatuiLayout},
+    style::{Color, Modifier, Style},
+    text::Span,
+    widgets::Paragraph,
+};
+use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
+
+use super::{protocol::SessionSnapshot, window::Window};
+
+/// In-process session — owns all windows and panes directly.
+///
+/// Used for `bmux` (no args) mode where no daemon is required.
+pub struct Session {
+    pub name: String,
+    windows: Vec<Window>,
+    active_window: usize,
+    created_at: DateTime<Utc>,
+    next_window_id: usize,
+}
+
+impl Session {
+    pub fn new(name: &str, rows: u16, cols: u16) -> Result<Self> {
+        // Reserve 1 row for the status bar
+        let content_rows = rows.saturating_sub(1).max(1);
+        let window = Window::new(0, content_rows, cols)?;
+        Ok(Self {
+            name: name.to_string(),
+            windows: vec![window],
+            active_window: 0,
+            created_at: Utc::now(),
+            next_window_id: 1,
+        })
+    }
+
+    pub fn window_count(&self) -> usize {
+        self.windows.len()
+    }
+
+    pub fn active_window(&mut self) -> &mut Window {
+        &mut self.windows[self.active_window]
+    }
+
+    // ── Story 1.4: Window management ─────────────────────────────────────────
+
+    /// Create a new window and switch focus to it.
+    pub fn create_window(&mut self, rows: u16, cols: u16) -> Result<()> {
+        let id = self.next_window_id;
+        self.next_window_id += 1;
+        let content_rows = rows.saturating_sub(1).max(1);
+        let window = Window::new(id, content_rows, cols)?;
+        self.windows.push(window);
+        self.active_window = self.windows.len() - 1;
+        Ok(())
+    }
+
+    /// Switch to window by 1-based index (Ctrl-b 1…9).
+    pub fn switch_to_window(&mut self, one_based_idx: usize) {
+        let idx = one_based_idx.saturating_sub(1);
+        if idx < self.windows.len() {
+            self.active_window = idx;
+        }
+    }
+
+    pub fn next_window(&mut self) {
+        if !self.windows.is_empty() {
+            self.active_window = (self.active_window + 1) % self.windows.len();
+        }
+    }
+
+    pub fn prev_window(&mut self) {
+        if !self.windows.is_empty() {
+            self.active_window =
+                (self.active_window + self.windows.len() - 1) % self.windows.len();
+        }
+    }
+
+    // ── Input forwarding ──────────────────────────────────────────────────────
+
+    pub fn send_input(&mut self, bytes: &[u8]) -> Result<()> {
+        self.active_window().send_input(bytes)
+    }
+
+    // ── Resize ────────────────────────────────────────────────────────────────
+
+    pub fn resize(&mut self, rows: u16, cols: u16) -> Result<()> {
+        let content_rows = rows.saturating_sub(1).max(1);
+        for w in &mut self.windows {
+            w.resize(content_rows, cols)?;
+        }
+        Ok(())
+    }
+
+    /// Capture a serializable snapshot for the daemon protocol.
+    pub fn snapshot(&self) -> SessionSnapshot {
+        SessionSnapshot {
+            name: self.name.clone(),
+            active_window: self.active_window,
+            windows: self.windows.iter().map(|w| w.snapshot()).collect(),
+        }
+    }
+
+    // ── Output polling ────────────────────────────────────────────────────────
+
+    pub fn poll_output(&self) -> bool {
+        self.windows.iter().any(|w| w.poll_output())
+    }
+
+    // ── Rendering ─────────────────────────────────────────────────────────────
+
+    pub fn render(&mut self, frame: &mut Frame) {
+        let total = frame.area();
+
+        // Split vertically: content area + 1-row status bar
+        let chunks = RatatuiLayout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Min(1),
+                Constraint::Length(1),
+            ])
+            .split(total);
+
+        let content_area = chunks[0];
+        let status_area = chunks[1];
+
+        // Render active window
+        let buf = frame.buffer_mut();
+        self.windows[self.active_window].render(buf, content_area);
+
+        // Render status bar
+        let status_line = self.build_status_bar();
+        frame.render_widget(Paragraph::new(status_line), status_area);
+    }
+
+    fn build_status_bar(&self) -> ratatui::text::Line<'static> {
+        use ratatui::text::Line;
+
+        let mut spans: Vec<Span> = Vec::new();
+
+        // Session name
+        spans.push(Span::styled(
+            format!(" [{}] ", self.name),
+            Style::default()
+                .fg(Color::Black)
+                .bg(Color::Green)
+                .add_modifier(Modifier::BOLD),
+        ));
+
+        // Window tabs
+        for (i, w) in self.windows.iter().enumerate() {
+            let is_active = i == self.active_window;
+            let label = format!(" {} {} ", i + 1, w.name);
+            if is_active {
+                spans.push(Span::styled(
+                    label,
+                    Style::default()
+                        .fg(Color::Black)
+                        .bg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
+                ));
+            } else {
+                spans.push(Span::styled(
+                    label,
+                    Style::default().fg(Color::White).bg(Color::DarkGray),
+                ));
+            }
+            spans.push(Span::raw(" "));
+        }
+
+        Line::from(spans)
+    }
+}
+
+// ── Session metadata (for daemon registry) ───────────────────────────────────
+
+/// Lightweight record stored in the session registry file.
+/// Used by `bmux ls` and `bmux attach/kill`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionMeta {
+    pub name: String,
+    pub pid: u32,
+    pub window_count: usize,
+    pub socket_path: PathBuf,
+    pub created_at: DateTime<Utc>,
+}
+
+impl SessionMeta {
+    pub fn new(name: &str, window_count: usize, socket_path: PathBuf) -> Self {
+        Self {
+            name: name.to_string(),
+            pid: std::process::id(),
+            window_count,
+            socket_path,
+            created_at: Utc::now(),
+        }
+    }
+}
+
+/// Path to the directory used as the session registry.
+/// Each active session writes `<name>.json` here.
+pub fn registry_dir() -> PathBuf {
+    let dir = PathBuf::from("/tmp/bmux");
+    let _ = std::fs::create_dir_all(&dir);
+    dir
+}
+
+/// Path to the Unix socket for a named session.
+pub fn socket_path(session_name: &str) -> PathBuf {
+    PathBuf::from(format!("/tmp/bmux-{}.sock", session_name))
+}
+
+/// Path to the metadata file for a named session.
+pub fn meta_path(session_name: &str) -> PathBuf {
+    registry_dir().join(format!("{}.json", session_name))
+}
+
+/// List all sessions visible in the registry.
+pub fn list_sessions() -> Vec<SessionMeta> {
+    let dir = registry_dir();
+    let Ok(entries) = std::fs::read_dir(&dir) else {
+        return Vec::new();
+    };
+    let mut sessions = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().is_some_and(|e| e == "json") {
+            if let Ok(data) = std::fs::read_to_string(&path) {
+                if let Ok(meta) = serde_json::from_str::<SessionMeta>(&data) {
+                    // Verify socket still exists (session is alive)
+                    if meta.socket_path.exists() {
+                        sessions.push(meta);
+                    } else {
+                        // Stale entry – clean up
+                        let _ = std::fs::remove_file(&path);
+                    }
+                }
+            }
+        }
+    }
+    sessions
+}
