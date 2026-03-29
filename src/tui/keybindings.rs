@@ -21,6 +21,8 @@ pub enum Action {
     NextWindow,
     PrevWindow,
     SwitchWindow(usize),
+    // Story 1.3 – cycle focus (tmux 'o')
+    FocusNextPane,
     // Story 1.5 – session management
     Detach,
     // Story 1.6 – pane zoom
@@ -96,6 +98,8 @@ impl KeybindingState {
             KeyCode::Char(c @ '1'..='9') => {
                 Some(Action::SwitchWindow((c as u8 - b'0') as usize))
             }
+            // Focus cycle (tmux 'o')
+            KeyCode::Char('o') => Some(Action::FocusNextPane),
             // Session management (Story 1.5)
             KeyCode::Char('d') => Some(Action::Detach),
             // Pane zoom (Story 1.6)
