@@ -1,0 +1,26 @@
+# BMUX Configuration File
+# Copy to ~/.config/bmux/config.toml and customize.
+# All fields are optional — unset fields use sensible defaults.
+
+# Prefix key (default: ctrl-b, same as tmux)
+prefix = "ctrl-b"
+
+# Scrollback buffer size per pane (lines). Minimum recommended: 10000.
+history_limit = 10000
+
+# Default shell for new panes. Defaults to $SHELL or /bin/sh.
+# default_shell = "/bin/zsh"
+
+# Enable mouse support (click to focus panes, scroll)
+mouse_support = false
+
+# ── Agent binaries ─────────────────────────────────────────────────────────
+[agents.claude_code]
+# Path or binary name for Claude Code agent
+binary = "claude"
+
+[agents.opencode]
+binary = "opencode"
+
+[agents.pi]
+binary = "pi"

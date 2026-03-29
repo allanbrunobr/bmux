@@ -1,0 +1,95 @@
+# .github/workflows/ci.yml — Continuous Integration
+# Story 7.1: Cargo Install & CI Build Pipeline
+#
+# Runs on every push and pull request:
+#   - Build + test on all 4 target platforms (via cross)
+#   - Clippy lints
+#   - rustfmt check
+
+name: CI
+
+on:
+  push:
+    branches: ["main", "bmux-bmad-*"]
+  pull_request:
+    branches: ["main"]
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  # ─── Build & Test (native) ──────────────────────────────────────────────────
+  test:
+    name: Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain (stable)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: cargo build
+        run: cargo build --verbose
+
+      - name: cargo test
+        run: cargo test --verbose
+
+      - name: cargo clippy
+        run: cargo clippy -- -D warnings
+
+      - name: cargo fmt check
+        run: cargo fmt --check
+
+  # ─── Cross-compile check (no run — just ensure the build succeeds) ──────────
+  cross-compile:
+    name: Cross-compile (${{ matrix.target }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            runner: ubuntu-latest
+          - target: aarch64-unknown-linux-gnu
+            runner: ubuntu-latest
+          - target: x86_64-apple-darwin
+            runner: macos-latest
+          - target: aarch64-apple-darwin
+            runner: macos-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install cross (Linux aarch64 only)
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: cargo install cross --git https://github.com/cross-rs/cross
+
+      - name: Build (cross — aarch64 Linux)
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: cross build --target ${{ matrix.target }} --release
+
+      - name: Build (cargo — native targets)
+        if: matrix.target != 'aarch64-unknown-linux-gnu'
+        run: cargo build --target ${{ matrix.target }} --release
