@@ -100,6 +100,10 @@ impl DaemonServer {
 }
 
 /// Handle one connected client for its lifetime.
+///
+/// Protocol: the first message from a client determines its type:
+/// - `Init { rows, cols }` → TUI client (gets state broadcasts)
+/// - Any CLI query (AgentList, TaskSend, etc.) → one-shot query/response, then close
 async fn handle_client(
     stream: UnixStream,
     session: Arc<Mutex<Session>>,
@@ -107,19 +111,73 @@ async fn handle_client(
 ) -> Result<()> {
     let (read_half, mut write_half) = stream.into_split();
     let mut lines = BufReader::new(read_half).lines();
-    let mut rx = broadcast_tx.subscribe();
 
     // Terminal size (negotiated via Init message)
     let mut term_rows: u16 = 24;
     let mut term_cols: u16 = 80;
 
-    // Send initial state immediately after connect
+    // Wait for the first message to determine client type.
+    // Do NOT send anything before the client speaks.
+    let first_line = match lines.next_line().await? {
+        Some(line) if !line.is_empty() => line,
+        _ => return Ok(()), // Client disconnected immediately
+    };
+
+    let first_msg: ClientMessage = match serde_json::from_str(&first_line) {
+        Ok(m) => m,
+        Err(e) => {
+            tracing::debug!("Invalid first message from client: {e}");
+            return Ok(());
+        }
+    };
+
+    // ── CLI one-shot query: handle, respond, close ────────────────────────
+    let is_cli_query = matches!(
+        first_msg,
+        ClientMessage::AgentList
+        | ClientMessage::AgentStatus { .. }
+        | ClientMessage::AgentSpawn { .. }
+        | ClientMessage::AgentKill { .. }
+        | ClientMessage::TaskList
+        | ClientMessage::TaskSend { .. }
+        | ClientMessage::TaskCancel { .. }
+        | ClientMessage::TaskStatus { .. }
+        | ClientMessage::ContextSet { .. }
+        | ClientMessage::ContextGet { .. }
+        | ClientMessage::ContextList
+        | ClientMessage::ContextDump
+    );
+
+    if is_cli_query {
+        let result = handle_client_message(
+            first_msg,
+            &session,
+            &mut term_rows,
+            &mut term_cols,
+        ).await?;
+        if let HandleResult::Reply(response) = result {
+            let json = serde_json::to_string(&response)? + "\n";
+            write_half.write_all(json.as_bytes()).await?;
+        }
+        // Close connection — CLI clients are one-shot
+        return Ok(());
+    }
+
+    // ── TUI client: full interactive session ──────────────────────────────
+
+    // Process the first message (Init or GetState)
+    handle_client_message(first_msg, &session, &mut term_rows, &mut term_cols).await?;
+
+    // Now send initial state
     {
         let sess = session.lock().await;
         let snap = build_snapshot(&sess);
         let msg = serde_json::to_string(&ServerMessage::State(snap))? + "\n";
         write_half.write_all(msg.as_bytes()).await?;
     }
+
+    // Subscribe to broadcasts only for TUI clients
+    let mut rx = broadcast_tx.subscribe();
 
     loop {
         tokio::select! {
@@ -158,13 +216,10 @@ async fn handle_client(
                                         break;
                                     }
                                     HandleResult::Reply(response) => {
-                                        // CLI query — send response and close
                                         let json = serde_json::to_string(&response)? + "\n";
                                         write_half.write_all(json.as_bytes()).await?;
-                                        // Don't break — client will close
                                     }
                                     HandleResult::Ok => {
-                                        // TUI mutation — send fresh state snapshot
                                         let snap = build_snapshot(&*session.lock().await);
                                         let json = serde_json::to_string(&ServerMessage::State(snap))? + "\n";
                                         write_half.write_all(json.as_bytes()).await?;
