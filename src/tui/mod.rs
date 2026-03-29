@@ -147,8 +147,9 @@ fn handle_mouse(mouse: MouseEvent, session: &mut Session, drag: &mut DragState) 
             }
         }
 
-        // Drag to resize
-        MouseEventKind::Drag(MouseButton::Left) => {
+        // Drag to resize (Drag on iTerm2/Warp, Moved on Terminal.app)
+        MouseEventKind::Drag(MouseButton::Left)
+        | MouseEventKind::Moved => {
             if let Some(left_id) = drag.left_pane_id {
                 session.active_window().drag_border(left_id, mouse.column);
             }
