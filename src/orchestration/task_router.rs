@@ -469,7 +469,7 @@ impl TaskRouter {
             status_map.insert(agent_id.clone(), AgentState::Working);
         }
 
-        // Send via message bus
+        // Send via message bus (best-effort — bus may not be running for in-process use)
         let payload = serde_json::to_value(TaskPayload {
             content,
             priority,
@@ -480,12 +480,14 @@ impl TaskRouter {
             .build_signed(&self.bus.hmac_key())
             .map_err(|e| anyhow!("Failed to sign task message: {e}"))?;
 
-        self.bus
-            .send_message(&msg)
-            .await
-            .map_err(|e| anyhow!("Failed to send task to agent '{agent_id}': {e}"))?;
-
-        info!(task_id = %task_id, agent = %agent_id, "Task dispatched");
+        match self.bus.send_message(&msg).await {
+            Ok(()) => info!(task_id = %task_id, agent = %agent_id, "Task dispatched via IPC"),
+            Err(e) => {
+                // Bus not running — task is still tracked in memory, just not delivered via socket.
+                // The daemon can poll task state and deliver to agents through PTY stdin.
+                info!(task_id = %task_id, agent = %agent_id, "Task dispatched (in-process, bus not active: {e})");
+            }
+        }
         Ok(())
     }
 
