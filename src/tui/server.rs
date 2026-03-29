@@ -329,6 +329,14 @@ async fn handle_client_message(
             }
         }
         ClientMessage::GetState => {} // state snapshot is sent after this returns
+        ClientMessage::MouseClick { col, row } => {
+            state.session.lock().await.focus_pane_at(col, row);
+        }
+        ClientMessage::MouseDrag { col, row: _ } => {
+            // TODO: full drag support requires tracking drag state per-client
+            // For now, just focus the pane at the mouse position
+            state.session.lock().await.focus_pane_at(col, 0);
+        }
 
         // ═══════════════════════════════════════════════════════════════════
         // CLI query handlers — real implementations using daemon-owned state

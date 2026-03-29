@@ -44,7 +44,7 @@ pub async fn run_client(socket: PathBuf) -> Result<()> {
     // Setup TUI
     enable_raw_mode()?;
     let mut stdout = std::io::stdout();
-    execute!(stdout, EnterAlternateScreen)?;
+    execute!(stdout, EnterAlternateScreen, crossterm::event::EnableMouseCapture)?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
@@ -146,6 +146,18 @@ pub async fn run_client(socket: PathBuf) -> Result<()> {
                         }
                     }
                 }
+                Event::Mouse(mouse) => {
+                    use crossterm::event::{MouseEventKind, MouseButton};
+                    match mouse.kind {
+                        MouseEventKind::Down(MouseButton::Left) => {
+                            let msg = serde_json::to_string(
+                                &ClientMessage::MouseClick { col: mouse.column, row: mouse.row }
+                            )? + "\n";
+                            write_half.write_all(msg.as_bytes()).await?;
+                        }
+                        _ => {}
+                    }
+                }
                 Event::Resize(cols, rows) => {
                     let msg =
                         serde_json::to_string(&ClientMessage::Resize { rows, cols })? + "\n";
@@ -160,7 +172,7 @@ pub async fn run_client(socket: PathBuf) -> Result<()> {
 
     // Cleanup
     disable_raw_mode()?;
-    execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
+    execute!(terminal.backend_mut(), LeaveAlternateScreen, crossterm::event::DisableMouseCapture)?;
     Ok(())
 }
 

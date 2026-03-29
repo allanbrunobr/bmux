@@ -224,6 +224,25 @@ impl Layout {
         self.resize_node(pane_id, dir);
     }
 
+    /// Set the split ratio of an HSplit that contains the given left pane.
+    /// `ratio` is clamped to [0.1, 0.9].
+    pub fn set_hsplit_ratio_for(&mut self, left_pane_id: usize, new_ratio: f32) {
+        match self {
+            Layout::Leaf(_) => {}
+            Layout::HSplit { left, right: _, ratio } => {
+                if left.contains(left_pane_id) {
+                    *ratio = new_ratio.clamp(0.1, 0.9);
+                    return;
+                }
+                left.set_hsplit_ratio_for(left_pane_id, new_ratio);
+            }
+            Layout::VSplit { top, bottom, .. } => {
+                top.set_hsplit_ratio_for(left_pane_id, new_ratio);
+                bottom.set_hsplit_ratio_for(left_pane_id, new_ratio);
+            }
+        }
+    }
+
     fn resize_node(&mut self, pane_id: usize, dir: ResizeDir) -> bool {
         match self {
             Layout::Leaf(id) => *id == pane_id,
