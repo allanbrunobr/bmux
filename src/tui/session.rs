@@ -45,6 +45,20 @@ impl Session {
         &mut self.windows[self.active_window]
     }
 
+    /// Split the active window horizontally and launch a command in the new pane.
+    /// Returns the new pane ID. Used by agent spawn to create agent panes.
+    pub fn split_and_run_command(&mut self, command: &str) -> Result<usize> {
+        let win = &mut self.windows[self.active_window];
+        win.split_horizontal()?;
+        let new_pane_id = win.focused_pane_id();
+
+        // Send the command to the new pane's shell
+        let cmd_bytes = format!("{}\n", command);
+        win.send_input_to_pane(new_pane_id, cmd_bytes.as_bytes())?;
+
+        Ok(new_pane_id)
+    }
+
     // ── Story 1.4: Window management ─────────────────────────────────────────
 
     /// Create a new window and switch focus to it.

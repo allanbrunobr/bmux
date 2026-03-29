@@ -37,8 +37,7 @@ use super::{
 struct DaemonState {
     session: Mutex<Session>,
     agents: Mutex<AgentRegistry>,
-    /// Live agent adapters (hold child process handles).
-    adapters: Mutex<std::collections::HashMap<String, Box<dyn crate::agents::AgentAdapter + Send>>>,
+
     context: ContextStore,
     task_router: TaskRouter,
     session_name: String,
@@ -72,7 +71,6 @@ impl DaemonServer {
             state: Arc::new(DaemonState {
                 session: Mutex::new(session),
                 agents: Mutex::new(AgentRegistry::new()),
-                adapters: Mutex::new(std::collections::HashMap::new()),
                 context,
                 task_router,
                 session_name: name.to_string(),
@@ -336,8 +334,6 @@ async fn handle_client_message(
         // ═══════════════════════════════════════════════════════════════════
 
         ClientMessage::AgentSpawn { agent_type, name, model } => {
-            use crate::agents::{AgentAdapter, GenericCliAdapter};
-
             let mut reg = state.agents.lock().await;
 
             if reg.get(&name).is_some() {
@@ -367,36 +363,44 @@ async fn handle_client_message(
                 return Ok(HandleResult::Reply(ServerMessage::QueryResult { data }));
             }
 
-            // Create adapter and actually spawn the child process
-            let mut adapter = GenericCliAdapter::new(
-                &name, &agent_type, &config.model, config.cost_per_1k_tokens,
-            );
-            adapter.set_session_context(
-                &state.session_name,
-                &state.ipc_socket_path.to_string_lossy(),
-            );
-
-            if let Err(e) = adapter.spawn(&config).await {
-                let data = format!("Error spawning agent '{}': {}", name, e);
-                return Ok(HandleResult::Reply(ServerMessage::QueryResult { data }));
+            // Build the command to launch inside the pane's shell
+            let mut agent_cmd = String::new();
+            // Export BMUX env vars into the pane's shell
+            agent_cmd.push_str(&format!(
+                "export BMUX_SESSION='{}' BMUX_SOCKET='{}' BMUX_AGENT_NAME='{}'; ",
+                state.session_name,
+                state.ipc_socket_path.display(),
+                name,
+            ));
+            // The actual agent binary + args
+            agent_cmd.push_str(&config.binary);
+            for arg in &config.args {
+                agent_cmd.push(' ');
+                agent_cmd.push_str(arg);
+            }
+            if !config.model.is_empty() && agent_type != "shell" {
+                agent_cmd.push_str(" --model ");
+                agent_cmd.push_str(&config.model);
             }
 
-            let pid = adapter.pid();
+            // Split the active window and launch the agent in the new pane
+            let pane_id = {
+                let mut sess = state.session.lock().await;
+                match sess.split_and_run_command(&agent_cmd) {
+                    Ok(id) => id,
+                    Err(e) => {
+                        let data = format!("Error creating agent pane: {}", e);
+                        return Ok(HandleResult::Reply(ServerMessage::QueryResult { data }));
+                    }
+                }
+            };
+
             let icon = agent_type_icon(&agent_type);
             let cost = config.cost_per_1k_tokens;
             let model_name = config.model.clone();
 
-            // Register in AgentRegistry with PID
+            // Register in AgentRegistry
             reg.register(&name, &agent_type, config);
-            if let Some(info) = reg.get_mut(&name) {
-                info.pid = pid;
-            }
-
-            // Store live adapter handle
-            {
-                let mut adapters = state.adapters.lock().await;
-                adapters.insert(name.clone(), Box::new(adapter));
-            }
 
             // Register in TaskRouter for auto-routing
             state.task_router.register_agent(task_router::AgentInfo {
@@ -410,11 +414,11 @@ async fn handle_client_message(
 
             let data = format!(
                 "Agent '{}' spawned successfully (pane: {} [{}])\n\
-                 PID: {}\n\
+                 Pane ID: {}\n\
                  Session: {}\n\
                  Env: BMUX_SESSION={} BMUX_SOCKET={}",
                 name, icon, name,
-                pid.map(|p| p.to_string()).unwrap_or_else(|| "unknown".into()),
+                pane_id,
                 state.session_name,
                 state.session_name,
                 state.ipc_socket_path.display(),
@@ -469,21 +473,12 @@ async fn handle_client_message(
         }
 
         ClientMessage::AgentKill { name } => {
-            // Kill the child process first
-            {
-                let mut adapters = state.adapters.lock().await;
-                if let Some(mut adapter) = adapters.remove(&name) {
-                    let _ = adapter.kill().await;
-                }
-            }
-
+            // TODO: close the agent's pane in the session
             let mut reg = state.agents.lock().await;
             let data = match reg.remove(&name) {
                 Ok(info) => {
                     state.task_router.handle_agent_crash(&name).await;
-                    format!("Agent '{}' ({}) killed. PID {} terminated.",
-                        info.name, info.agent_type,
-                        info.pid.map(|p| p.to_string()).unwrap_or_else(|| "?".into()))
+                    format!("Agent '{}' ({}) killed.", info.name, info.agent_type)
                 }
                 Err(e) => format!("Error: {}", e),
             };
