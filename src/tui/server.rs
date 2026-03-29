@@ -519,14 +519,18 @@ async fn handle_client_message(
                 }
             };
 
-            // Deliver the task content to the agent's pane PTY stdin
+            // Deliver the task content to the agent's pane PTY stdin.
+            // Use \r (carriage return) to simulate pressing Enter in the terminal.
+            // PTYs treat \r as the Enter key, not \n.
             if let Some(target) = target_agent {
                 let reg = state.agents.lock().await;
                 if let Some(info) = reg.get(&target) {
                     if let Some(pane_id) = info.pane_id {
                         let mut sess = state.session.lock().await;
-                        let input = format!("{}\n", content);
-                        if let Err(e) = sess.send_input_to_pane(pane_id, input.as_bytes()) {
+                        // Write content + carriage return (Enter key)
+                        let mut input = content.into_bytes();
+                        input.push(b'\r');
+                        if let Err(e) = sess.send_input_to_pane(pane_id, &input) {
                             tracing::warn!(agent = %target, pane = pane_id, "Failed to deliver task to PTY: {e}");
                         }
                     }
