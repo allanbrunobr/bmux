@@ -43,6 +43,9 @@ enum Commands {
     // ── Agent management (Epic 2) ──────────────────────────────────────────
     /// Manage AI agents (spawn, list, status, kill)
     Agent {
+        /// Session name (auto-detects if only one is running)
+        #[arg(short = 's', long, global = true)]
+        session: Option<String>,
         #[command(subcommand)]
         action: AgentCommands,
     },
@@ -50,6 +53,9 @@ enum Commands {
     // ── Task routing (Epic 3) ──────────────────────────────────────────────
     /// Send and manage tasks for agents
     Task {
+        /// Session name
+        #[arg(short = 's', long, global = true)]
+        session: Option<String>,
         #[command(subcommand)]
         action: TaskCommands,
     },
@@ -57,6 +63,9 @@ enum Commands {
     // ── Shared context (Epic 4) ────────────────────────────────────────────
     /// Read/write shared context store
     Context {
+        /// Session name
+        #[arg(short = 's', long, global = true)]
+        session: Option<String>,
         #[command(subcommand)]
         action: ContextCommands,
     },
@@ -64,6 +73,9 @@ enum Commands {
     // ── Workflow orchestration (Epic 5) ────────────────────────────────────
     /// Run and manage multi-agent workflows
     Workflow {
+        /// Session name
+        #[arg(short = 's', long, global = true)]
+        session: Option<String>,
         #[command(subcommand)]
         action: WorkflowCommands,
     },
@@ -236,10 +248,10 @@ async fn main() -> Result<()> {
         Some(Commands::Attach { session }) => cmd_attach(&session).await,
         Some(Commands::Ls) => cmd_ls(),
         Some(Commands::Kill { session }) => cmd_kill(&session),
-        Some(Commands::Agent { action }) => cmd_agent(action).await,
-        Some(Commands::Task { action }) => cmd_task(action).await,
-        Some(Commands::Context { action }) => cmd_context(action),
-        Some(Commands::Workflow { action }) => cmd_workflow(action).await,
+        Some(Commands::Agent { session, action }) => cmd_agent(session.as_deref(), action).await,
+        Some(Commands::Task { session, action }) => cmd_task(session.as_deref(), action).await,
+        Some(Commands::Context { session, action }) => cmd_context(session.as_deref(), action).await,
+        Some(Commands::Workflow { session, action }) => cmd_workflow(session.as_deref(), action).await,
         Some(Commands::Config { action }) => cmd_config(action),
         Some(Commands::Data { action }) => cmd_data(action),
     }
@@ -316,152 +328,102 @@ fn cmd_kill(name: &str) -> Result<()> {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Agent commands (Epic 2)
+// Agent commands (Epic 2) — all queries go through session daemon IPC
 // ═══════════════════════════════════════════════════════════════════════════════
 
-async fn cmd_agent(action: AgentCommands) -> Result<()> {
-    use bmux::agents::{commands as agent_cmd, AgentRegistry};
+async fn cmd_agent(session: Option<&str>, action: AgentCommands) -> Result<()> {
+    use bmux::tui::ipc_client::{query, resolve_session};
+    use bmux::tui::protocol::ClientMessage;
 
-    let mut registry = AgentRegistry::new();
+    let sock = resolve_session(session)?;
 
-    match action {
+    let msg = match action {
         AgentCommands::Spawn { agent_type, name, model } => {
-            agent_cmd::handle_spawn(&mut registry, &agent_type, &name, model.as_deref()).await
+            ClientMessage::AgentSpawn { agent_type, name, model }
         }
-        AgentCommands::List => {
-            agent_cmd::handle_list(&registry);
-            Ok(())
-        }
-        AgentCommands::Status { name } => {
-            agent_cmd::handle_status(&registry, &name)
-        }
-        AgentCommands::Kill { name } => {
-            agent_cmd::handle_kill(&mut registry, &name).await
-        }
-    }
+        AgentCommands::List => ClientMessage::AgentList,
+        AgentCommands::Status { name } => ClientMessage::AgentStatus { name },
+        AgentCommands::Kill { name } => ClientMessage::AgentKill { name },
+    };
+
+    let result = query(&sock, msg).await?;
+    println!("{}", result);
+    Ok(())
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Task commands (Epic 3)
+// Task commands (Epic 3) — all queries go through session daemon IPC
 // ═══════════════════════════════════════════════════════════════════════════════
 
-async fn cmd_task(action: TaskCommands) -> Result<()> {
-    use bmux::orchestration::message_bus::MessageBus;
-    use bmux::orchestration::task_router::TaskRouter;
-    use std::sync::Arc;
+async fn cmd_task(session: Option<&str>, action: TaskCommands) -> Result<()> {
+    use bmux::tui::ipc_client::{query, resolve_session};
+    use bmux::tui::protocol::ClientMessage;
 
-    // Connect to the running session's message bus
-    // For now, create a local instance (full integration needs session IPC)
-    let bus = Arc::new(MessageBus::new("default")?);
-    let router = TaskRouter::new(bus, 300);
+    let sock = resolve_session(session)?;
 
-    match action {
+    let msg = match action {
         TaskCommands::Send { agent, content, auto: _, model } => {
-            if let Some(agent_name) = agent {
-                let result = router.send_to_agent(&agent_name, &content, 1).await?;
-                println!("{:?}", result);
-            } else {
-                let result = router.send_auto(&content, model.as_deref(), None).await?;
-                println!("{:?}", result);
-            }
-            Ok(())
+            ClientMessage::TaskSend { agent, content, model }
         }
-        TaskCommands::List => {
-            let tasks = router.list_tasks().await;
-            if tasks.is_empty() {
-                println!("No tasks.");
-            } else {
-                for t in &tasks {
-                    println!("{:<8} {:<15} {:<10}", t.id, t.destination, t.status);
-                }
-            }
-            Ok(())
-        }
-        TaskCommands::Cancel { id } => {
-            router.cancel_task(&id).await?;
-            println!("Task {} cancelled.", id);
-            Ok(())
-        }
-        TaskCommands::Status { id } => {
-            let task = router.task_status(&id).await
-                .ok_or_else(|| anyhow::anyhow!("Task '{}' not found", id))?;
-            println!("{:#?}", task);
-            Ok(())
-        }
-    }
+        TaskCommands::List => ClientMessage::TaskList,
+        TaskCommands::Cancel { id } => ClientMessage::TaskCancel { id },
+        TaskCommands::Status { id } => ClientMessage::TaskStatus { id },
+    };
+
+    let result = query(&sock, msg).await?;
+    println!("{}", result);
+    Ok(())
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Context commands (Epic 4)
+// Context commands (Epic 4) — all queries go through session daemon IPC
 // ═══════════════════════════════════════════════════════════════════════════════
 
-fn cmd_context(action: ContextCommands) -> Result<()> {
-    use bmux::storage::context_store::ContextStore;
+async fn cmd_context(session: Option<&str>, action: ContextCommands) -> Result<()> {
+    use bmux::tui::ipc_client::{query, resolve_session};
+    use bmux::tui::protocol::ClientMessage;
 
-    let db_path = dirs::data_local_dir()
-        .unwrap_or_default()
-        .join("bmux")
-        .join("context");
-    let store = ContextStore::open("default", &db_path)?;
+    let sock = resolve_session(session)?;
 
-    match action {
-        ContextCommands::Set { key, value } => {
-            store.set(&key, &value, None)?;
-            println!("Set '{}'.", key);
-            Ok(())
-        }
-        ContextCommands::Get { key } => {
-            match store.get(&key)? {
-                Some(val) => println!("{}", val),
-                None => println!("Key not found: {}", key),
-            }
-            Ok(())
-        }
-        ContextCommands::List => {
-            let entries = store.list()?;
-            if entries.is_empty() {
-                println!("No context entries.");
-            } else {
-                for (key, preview) in &entries {
-                    println!("{:<40} {}", key, preview);
-                }
-            }
-            Ok(())
-        }
-        ContextCommands::Dump => {
-            let json = store.dump_json()?;
-            println!("{}", json);
-            Ok(())
-        }
-    }
+    let msg = match action {
+        ContextCommands::Set { key, value } => ClientMessage::ContextSet { key, value },
+        ContextCommands::Get { key } => ClientMessage::ContextGet { key },
+        ContextCommands::List => ClientMessage::ContextList,
+        ContextCommands::Dump => ClientMessage::ContextDump,
+    };
+
+    let result = query(&sock, msg).await?;
+    println!("{}", result);
+    Ok(())
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Workflow commands (Epic 5)
+// Workflow commands (Epic 5) — dry-run is local, execution goes through IPC
 // ═══════════════════════════════════════════════════════════════════════════════
 
-async fn cmd_workflow(action: WorkflowCommands) -> Result<()> {
+async fn cmd_workflow(session: Option<&str>, action: WorkflowCommands) -> Result<()> {
     use bmux::config::settings::BmuxConfig;
     use bmux::workflow::yaml_parser::WorkflowParser;
 
-    let parser = WorkflowParser::new();
-    let settings = BmuxConfig::load().unwrap_or_default();
-
     match action {
         WorkflowCommands::Run { file, input: _, dry_run } => {
+            let parser = WorkflowParser::new();
+            let settings = BmuxConfig::load().unwrap_or_default();
             let dag = parser.parse_file(&file)?;
 
             if dry_run {
                 let summary = parser.dry_run_summary(&dag, &settings);
                 println!("{}", summary);
             } else {
-                // Full execution requires a running session with context store
-                println!("Workflow execution requires an active bmux session.");
-                println!("Use --dry-run to validate, or run from within a session.");
+                // TODO: send WorkflowRun message to daemon via IPC
+                let _sock = bmux::tui::ipc_client::resolve_session(session)?;
+                println!("Workflow execution via IPC — not yet implemented.");
+                println!("Use --dry-run to validate.");
             }
             Ok(())
         }
         WorkflowCommands::List => {
+            let parser = WorkflowParser::new();
             let workflow_dir = dirs::config_dir()
                 .unwrap_or_default()
                 .join("bmux")
@@ -481,7 +443,9 @@ async fn cmd_workflow(action: WorkflowCommands) -> Result<()> {
             Ok(())
         }
         WorkflowCommands::Status { id } => {
-            println!("Workflow status for '{}' — requires active session.", id);
+            // TODO: query daemon for workflow status
+            let _sock = bmux::tui::ipc_client::resolve_session(session)?;
+            println!("Workflow status for '{}' — not yet implemented via IPC.", id);
             Ok(())
         }
     }
