@@ -146,8 +146,9 @@ impl MessageBus {
     /// `/tmp/bmux-{session_id}.sock`. Does NOT bind the socket yet.
     pub fn new(session_id: impl Into<String>) -> Result<Self> {
         let session_id = session_id.into();
+        // Use a separate socket for the agent IPC bus (distinct from the TUI daemon socket)
         let socket_path =
-            PathBuf::from(format!("/tmp/bmux-{}.sock", session_id));
+            PathBuf::from(format!("/tmp/bmux-{}-ipc.sock", session_id));
         let hmac_key = Arc::new(generate_session_key()?);
         let (tx, _) = broadcast::channel(CHANNEL_CAPACITY);
         Ok(Self {
