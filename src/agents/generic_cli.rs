@@ -122,13 +122,19 @@ impl AgentAdapter for GenericCliAdapter {
     }
 
     async fn spawn(&mut self, config: &AgentConfig) -> anyhow::Result<()> {
-        // For non-shell agents, verify binary exists
+        // For non-shell agents, verify binary exists before spawning
         if self.agent_type != "shell" && which::which(&config.binary).is_err() {
             anyhow::bail!(
                 "Agent binary '{}' not found in PATH",
                 config.binary
             );
         }
+
+        // ── Step 1: Spawn a login shell in the PTY ───────────────────────
+        // This is the amux pattern: shell first, agent inside shell.
+        // The shell provides the full TTY environment that tools like
+        // claude, opencode, pi require to stay alive.
+        let login_shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string());
 
         let pty_system = native_pty_system();
         let pair = pty_system
@@ -140,20 +146,10 @@ impl AgentAdapter for GenericCliAdapter {
             })
             .context("Failed to open PTY for agent")?;
 
-        let mut cmd = CommandBuilder::new(&config.binary);
+        let mut cmd = CommandBuilder::new(&login_shell);
+        cmd.arg("-l"); // login shell — loads profile, PATH, etc.
 
-        // Add model flag if present
-        if !config.model.is_empty() && self.agent_type != "shell" {
-            cmd.arg("--model");
-            cmd.arg(&config.model);
-        }
-
-        // Add extra args
-        for arg in &config.args {
-            cmd.arg(arg);
-        }
-
-        // Inject BMUX session context
+        // Inject BMUX session context into the shell environment
         if let Some(ref sess) = self.session_name {
             cmd.env("BMUX_SESSION", sess);
         }
@@ -161,14 +157,14 @@ impl AgentAdapter for GenericCliAdapter {
             cmd.env("BMUX_SOCKET", sock);
         }
         cmd.env("BMUX_AGENT_NAME", &self.id);
+        cmd.env("BMUX_AGENT_TYPE", &self.agent_type);
         cmd.env("TERM", "xterm-256color");
 
         let child = pair
             .slave
             .spawn_command(cmd)
-            .context(format!("Failed to spawn agent binary '{}'", config.binary))?;
+            .context(format!("Failed to spawn login shell for agent '{}'", self.id))?;
 
-        // Get PID before moving child
         self.child_pid = child.process_id();
 
         let writer = pair
@@ -196,7 +192,6 @@ impl AgentAdapter for GenericCliAdapter {
                             let text = String::from_utf8_lossy(&buf[..n]).to_string();
                             if let Ok(mut lines) = output_buf.lock() {
                                 lines.push(text);
-                                // Cap buffer at 1000 entries
                                 if lines.len() > 1000 {
                                     lines.drain(..500);
                                 }
@@ -212,15 +207,55 @@ impl AgentAdapter for GenericCliAdapter {
         self.pty_writer = Some(Arc::new(Mutex::new(writer)));
         self.child = Some(Arc::new(Mutex::new(child)));
         self.spawned_at = Some(Instant::now());
+
+        // ── Step 2: Wait for the shell to be ready ───────────────────────
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+
+        // ── Step 3: Launch the agent inside the shell ────────────────────
+        // For shell-type agents, we're done — the shell IS the agent.
+        // For all other types, send the agent command to the shell's stdin.
+        if self.agent_type != "shell" {
+            let mut agent_cmd = config.binary.clone();
+
+            // Add args (e.g. --dangerously-skip-permissions for claude)
+            for arg in &config.args {
+                agent_cmd.push(' ');
+                agent_cmd.push_str(arg);
+            }
+
+            // Add model flag if present
+            if !config.model.is_empty() {
+                agent_cmd.push_str(" --model ");
+                agent_cmd.push_str(&config.model);
+            }
+
+            // Send the command to the shell
+            {
+                let writer_ref = self.pty_writer.as_ref()
+                    .context("PTY writer not available")?;
+                let mut w = writer_ref.lock().unwrap();
+                w.write_all(agent_cmd.as_bytes())?;
+                w.write_all(b"\n")?;
+                w.flush()?;
+            }
+
+            tracing::info!(
+                agent = %self.id,
+                pid = ?self.child_pid,
+                shell = %login_shell,
+                agent_cmd = %agent_cmd,
+                "Agent launched inside shell PTY"
+            );
+        } else {
+            tracing::info!(
+                agent = %self.id,
+                pid = ?self.child_pid,
+                shell = %login_shell,
+                "Shell agent spawned with PTY"
+            );
+        }
+
         self.status = AgentStatus::Idle;
-
-        tracing::info!(
-            agent = %self.id,
-            pid = ?self.child_pid,
-            binary = %config.binary,
-            "Agent spawned with PTY"
-        );
-
         Ok(())
     }
 
