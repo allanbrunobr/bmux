@@ -103,6 +103,18 @@ impl Window {
         }
     }
 
+    /// Cycle focus to the next pane (Ctrl-b o).
+    pub fn focus_next_pane(&mut self) {
+        if self.panes.is_empty() {
+            return;
+        }
+        let ids: Vec<usize> = self.panes.iter().map(|p| p.id).collect();
+        if let Some(pos) = ids.iter().position(|&id| id == self.focused_pane) {
+            let next = (pos + 1) % ids.len();
+            self.focused_pane = ids[next];
+        }
+    }
+
     pub fn resize_pane(&mut self, dir: ResizeDir) {
         self.layout.resize_pane(self.focused_pane, dir);
     }

@@ -319,6 +319,7 @@ async fn handle_client_message(
                 Action::NextWindow => sess.next_window(),
                 Action::PrevWindow => sess.prev_window(),
                 Action::SwitchWindow(n) => sess.switch_to_window(n),
+                Action::FocusNextPane => sess.active_window().focus_next_pane(),
                 Action::ToggleZoom => { /* TODO: integrate ZoomState */ }
                 Action::EnterScrollMode => { /* TODO: integrate ScrollState */ }
                 Action::ReloadConfig => {

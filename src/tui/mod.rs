@@ -146,6 +146,7 @@ fn handle_action(
         Action::NextWindow => session.next_window(),
         Action::PrevWindow => session.prev_window(),
         Action::SwitchWindow(n) => session.switch_to_window(n),
+        Action::FocusNextPane => session.active_window().focus_next_pane(),
         Action::ToggleZoom => { /* TODO: integrate ZoomState with Window */ }
         Action::EnterScrollMode => { /* TODO: integrate ScrollState with Pane */ }
         Action::ReloadConfig => {
