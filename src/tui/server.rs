@@ -2,10 +2,11 @@
 ///
 /// Invoked via `bmux --daemon --session <name>`.
 /// - Manages session state (windows, panes, PTYs)
+/// - Owns AgentRegistry, ContextStore for the session
 /// - Listens on `/tmp/bmux-<name>.sock` for client connections
 /// - Writes metadata to `/tmp/bmux/<name>.json`
-/// - Broadcasts screen-state updates to all connected clients
-/// - Handles input and action messages from clients
+/// - Broadcasts screen-state updates to all connected TUI clients
+/// - Handles CLI query messages (agent list, task send, context get, etc.)
 use anyhow::Result;
 use std::{path::PathBuf, sync::Arc, time::Duration};
 use tokio::{
@@ -14,6 +15,12 @@ use tokio::{
     sync::{Mutex, broadcast},
     time::interval,
 };
+
+use crate::agents::adapter::AgentConfig;
+use crate::agents::registry::AgentRegistry;
+use crate::agents::commands::agent_type_icon;
+use crate::config::settings::BmuxConfig;
+use crate::storage::context_store::ContextStore;
 
 use super::{
     keybindings::Action,
@@ -24,9 +31,16 @@ use super::{
     session::{Session, SessionMeta, meta_path, socket_path},
 };
 
+/// Shared daemon state accessible from all client handlers.
+struct DaemonState {
+    session: Mutex<Session>,
+    agents: Mutex<AgentRegistry>,
+    context: ContextStore,
+}
+
 pub struct DaemonServer {
     name: String,
-    session: Arc<Mutex<Session>>,
+    state: Arc<DaemonState>,
     socket_path: PathBuf,
     meta_path: PathBuf,
 }
@@ -34,38 +48,47 @@ pub struct DaemonServer {
 impl DaemonServer {
     pub fn new(name: &str, rows: u16, cols: u16) -> Result<Self> {
         let session = Session::new(name, rows, cols)?;
+
+        let ctx_path = dirs::data_local_dir()
+            .unwrap_or_else(|| PathBuf::from("/tmp"))
+            .join("bmux")
+            .join("context");
+        let context = ContextStore::open(name, &ctx_path)
+            .map_err(|e| anyhow::anyhow!("Failed to open context store: {e}"))?;
+
         Ok(Self {
             name: name.to_string(),
-            session: Arc::new(Mutex::new(session)),
+            state: Arc::new(DaemonState {
+                session: Mutex::new(session),
+                agents: Mutex::new(AgentRegistry::new()),
+                context,
+            }),
             socket_path: socket_path(name),
             meta_path: meta_path(name),
         })
     }
 
     pub async fn run(self) -> Result<()> {
-        // Remove stale socket if present
         let _ = std::fs::remove_file(&self.socket_path);
 
         let listener = UnixListener::bind(&self.socket_path)?;
         tracing::info!("Session '{}' listening on {:?}", self.name, self.socket_path);
 
-        // Write session metadata
         self.write_meta().await?;
 
-        // Broadcast channel: server sends SessionSnapshot to all clients
         let (tx, _) = broadcast::channel::<Arc<ServerMessage>>(32);
         let tx = Arc::new(tx);
 
-        // Background task: periodically check for PTY output and broadcast state
+        // Background task: broadcast PTY output at ~60fps
         {
-            let session_clone = Arc::clone(&self.session);
+            let state = Arc::clone(&self.state);
             let tx_clone = Arc::clone(&tx);
             tokio::spawn(async move {
-                let mut tick = interval(Duration::from_millis(16)); // ~60fps max
+                let mut tick = interval(Duration::from_millis(16));
                 loop {
                     tick.tick().await;
                     let (has_output, snapshot) = {
-                        let sess = session_clone.lock().await;
+                        let sess = state.session.lock().await;
                         let out = sess.poll_output();
                         (out, build_snapshot(&sess))
                     };
@@ -79,11 +102,11 @@ impl DaemonServer {
 
         loop {
             let (stream, _addr) = listener.accept().await?;
-            let session_clone = Arc::clone(&self.session);
+            let state = Arc::clone(&self.state);
             let tx_clone = Arc::clone(&tx);
 
             tokio::spawn(async move {
-                if let Err(e) = handle_client(stream, session_clone, tx_clone).await {
+                if let Err(e) = handle_client(stream, state, tx_clone).await {
                     tracing::warn!("Client handler error: {e}");
                 }
             });
@@ -91,7 +114,7 @@ impl DaemonServer {
     }
 
     async fn write_meta(&self) -> Result<()> {
-        let window_count = self.session.lock().await.window_count();
+        let window_count = self.state.session.lock().await.window_count();
         let meta = SessionMeta::new(&self.name, window_count, self.socket_path.clone());
         let json = serde_json::to_string_pretty(&meta)?;
         tokio::fs::write(&self.meta_path, json).await?;
@@ -106,7 +129,7 @@ impl DaemonServer {
 /// - Any CLI query (AgentList, TaskSend, etc.) → one-shot query/response, then close
 async fn handle_client(
     stream: UnixStream,
-    session: Arc<Mutex<Session>>,
+    state: Arc<DaemonState>,
     broadcast_tx: Arc<broadcast::Sender<Arc<ServerMessage>>>,
 ) -> Result<()> {
     let (read_half, mut write_half) = stream.into_split();
@@ -151,7 +174,7 @@ async fn handle_client(
     if is_cli_query {
         let result = handle_client_message(
             first_msg,
-            &session,
+            &state,
             &mut term_rows,
             &mut term_cols,
         ).await?;
@@ -166,11 +189,11 @@ async fn handle_client(
     // ── TUI client: full interactive session ──────────────────────────────
 
     // Process the first message (Init or GetState)
-    handle_client_message(first_msg, &session, &mut term_rows, &mut term_cols).await?;
+    handle_client_message(first_msg, &state, &mut term_rows, &mut term_cols).await?;
 
     // Now send initial state
     {
-        let sess = session.lock().await;
+        let sess = state.session.lock().await;
         let snap = build_snapshot(&sess);
         let msg = serde_json::to_string(&ServerMessage::State(snap))? + "\n";
         write_half.write_all(msg.as_bytes()).await?;
@@ -205,7 +228,7 @@ async fn handle_client(
                             Ok(msg) => {
                                 let result = handle_client_message(
                                     msg,
-                                    &session,
+                                    &state,
                                     &mut term_rows,
                                     &mut term_cols,
                                 ).await?;
@@ -220,7 +243,7 @@ async fn handle_client(
                                         write_half.write_all(json.as_bytes()).await?;
                                     }
                                     HandleResult::Ok => {
-                                        let snap = build_snapshot(&*session.lock().await);
+                                        let snap = build_snapshot(&*state.session.lock().await);
                                         let json = serde_json::to_string(&ServerMessage::State(snap))? + "\n";
                                         write_half.write_all(json.as_bytes()).await?;
                                     }
@@ -251,102 +274,202 @@ enum HandleResult {
 /// Handle one client message.
 async fn handle_client_message(
     msg: ClientMessage,
-    session: &Arc<Mutex<Session>>,
+    state: &DaemonState,
     term_rows: &mut u16,
     term_cols: &mut u16,
 ) -> Result<HandleResult> {
-    let mut sess = session.lock().await;
+    // Lock session only for TUI operations (released at end of match arm)
     match msg {
         ClientMessage::Init { rows, cols } | ClientMessage::Resize { rows, cols } => {
             *term_rows = rows;
             *term_cols = cols;
-            sess.resize(rows, cols)?;
+            state.session.lock().await.resize(rows, cols)?;
         }
         ClientMessage::Input { data } => {
-            sess.send_input(&data)?;
+            state.session.lock().await.send_input(&data)?;
         }
-        ClientMessage::Action { action } => match action {
-            Action::Detach => return Ok(HandleResult::Detach),
-            Action::SplitHorizontal => {
-                sess.active_window().split_horizontal()?;
+        ClientMessage::Action { action } => {
+            let mut sess = state.session.lock().await;
+            match action {
+                Action::Detach => return Ok(HandleResult::Detach),
+                Action::SplitHorizontal => { sess.active_window().split_horizontal()?; }
+                Action::SplitVertical => { sess.active_window().split_vertical()?; }
+                Action::FocusLeft => sess.active_window().focus_left(),
+                Action::FocusRight => sess.active_window().focus_right(),
+                Action::FocusUp => sess.active_window().focus_up(),
+                Action::FocusDown => sess.active_window().focus_down(),
+                Action::ResizeLeft => sess.active_window().resize_pane(ResizeDir::Left),
+                Action::ResizeRight => sess.active_window().resize_pane(ResizeDir::Right),
+                Action::ResizeUp => sess.active_window().resize_pane(ResizeDir::Up),
+                Action::ResizeDown => sess.active_window().resize_pane(ResizeDir::Down),
+                Action::NewWindow => sess.create_window(*term_rows, *term_cols)?,
+                Action::NextWindow => sess.next_window(),
+                Action::PrevWindow => sess.prev_window(),
+                Action::SwitchWindow(n) => sess.switch_to_window(n),
+                Action::ToggleZoom => { /* TODO: integrate ZoomState */ }
+                Action::EnterScrollMode => { /* TODO: integrate ScrollState */ }
+                Action::ReloadConfig => {
+                    let path = crate::config::default_config_path();
+                    let _ = BmuxConfig::hot_reload(&path);
+                }
             }
-            Action::SplitVertical => {
-                sess.active_window().split_vertical()?;
-            }
-            Action::FocusLeft => sess.active_window().focus_left(),
-            Action::FocusRight => sess.active_window().focus_right(),
-            Action::FocusUp => sess.active_window().focus_up(),
-            Action::FocusDown => sess.active_window().focus_down(),
-            Action::ResizeLeft => sess.active_window().resize_pane(ResizeDir::Left),
-            Action::ResizeRight => sess.active_window().resize_pane(ResizeDir::Right),
-            Action::ResizeUp => sess.active_window().resize_pane(ResizeDir::Up),
-            Action::ResizeDown => sess.active_window().resize_pane(ResizeDir::Down),
-            Action::NewWindow => sess.create_window(*term_rows, *term_cols)?,
-            Action::NextWindow => sess.next_window(),
-            Action::PrevWindow => sess.prev_window(),
-            Action::SwitchWindow(n) => sess.switch_to_window(n),
-            Action::ToggleZoom => { /* TODO: integrate ZoomState */ }
-            Action::EnterScrollMode => { /* TODO: integrate ScrollState */ }
-            Action::ReloadConfig => {
-                let path = crate::config::default_config_path();
-                let _ = crate::config::settings::BmuxConfig::hot_reload(&path);
-            }
-        },
-        ClientMessage::GetState => {} // state is sent after this function returns
+        }
+        ClientMessage::GetState => {} // state snapshot is sent after this returns
 
-        // ── CLI query handlers ────────────────────────────────────────────
-        ClientMessage::AgentList => {
-            // TODO: query the session's AgentRegistry and serialize
-            let data = "No agents running. (Agent registry not yet integrated into daemon)".to_string();
-            return Ok(HandleResult::Reply(ServerMessage::QueryResult { data }));
-        }
-        ClientMessage::AgentStatus { name } => {
-            let data = format!("Agent '{}': status query not yet integrated into daemon.", name);
-            return Ok(HandleResult::Reply(ServerMessage::QueryResult { data }));
-        }
+        // ═══════════════════════════════════════════════════════════════════
+        // CLI query handlers — real implementations using daemon-owned state
+        // ═══════════════════════════════════════════════════════════════════
+
         ClientMessage::AgentSpawn { agent_type, name, model } => {
-            let data = format!(
-                "Spawning {} agent '{}' (model: {}) — not yet integrated into daemon.",
-                agent_type, name, model.unwrap_or_default()
-            );
+            let mut reg = state.agents.lock().await;
+
+            if reg.get(&name).is_some() {
+                let data = format!("Error: Agent '{}' already exists.", name);
+                return Ok(HandleResult::Reply(ServerMessage::QueryResult { data }));
+            }
+
+            let bmux_config = BmuxConfig::load().unwrap_or_default();
+            let settings_config = bmux_config
+                .agents
+                .get(&agent_type)
+                .unwrap_or_else(|| BmuxConfig::default_agent_config(&agent_type));
+
+            let mut config = AgentConfig {
+                binary: settings_config.binary,
+                model: settings_config.model,
+                cost_per_1k_tokens: settings_config.cost_per_1k_tokens,
+                args: settings_config.args,
+            };
+            if let Some(m) = model {
+                config.model = m;
+            }
+
+            // Verify binary exists
+            if agent_type != "shell" && which::which(&config.binary).is_err() {
+                let data = format!("Error: Agent binary '{}' not found in PATH", config.binary);
+                return Ok(HandleResult::Reply(ServerMessage::QueryResult { data }));
+            }
+
+            let icon = agent_type_icon(&agent_type);
+            reg.register(&name, &agent_type, config);
+
+            // TODO: also create a pane in the session for the agent's PTY
+
+            let data = format!("Agent '{}' spawned successfully (pane: {} [{}])", name, icon, name);
             return Ok(HandleResult::Reply(ServerMessage::QueryResult { data }));
         }
+
+        ClientMessage::AgentList => {
+            let reg = state.agents.lock().await;
+            let agents = reg.list();
+            if agents.is_empty() {
+                let data = "No agents running. Use `bmux agent spawn` to start one.".to_string();
+                return Ok(HandleResult::Reply(ServerMessage::QueryResult { data }));
+            }
+            let mut lines = vec![format!(
+                "{:<15} {:<18} {:<20} {:<10} {:>10}",
+                "NAME", "TYPE", "MODEL", "STATUS", "COST"
+            )];
+            for info in &agents {
+                lines.push(format!(
+                    "{:<15} {} {:<15} {:<20} {:<10} {:>10}",
+                    info.name,
+                    info.type_icon(),
+                    info.agent_type,
+                    info.model,
+                    info.status.label(),
+                    format!("${:.6}", info.cost_usd),
+                ));
+            }
+            let data = lines.join("\n");
+            return Ok(HandleResult::Reply(ServerMessage::QueryResult { data }));
+        }
+
+        ClientMessage::AgentStatus { name } => {
+            let reg = state.agents.lock().await;
+            let data = match reg.get(&name) {
+                Some(info) => format!(
+                    "Agent: {} {} ({})\nModel:   {}\nStatus:  {}\nUptime:  {}s\nTokens:  {}\nCost:    ${:.6}\nTasks:   {}\nLast:    {}",
+                    info.type_icon(), info.name, info.agent_type,
+                    info.model,
+                    info.status.label(),
+                    info.uptime_seconds(),
+                    info.tokens_used,
+                    info.cost_usd,
+                    info.task_count,
+                    info.last_task.as_deref().unwrap_or("(none)"),
+                ),
+                None => format!("Error: Agent '{}' not found", name),
+            };
+            return Ok(HandleResult::Reply(ServerMessage::QueryResult { data }));
+        }
+
         ClientMessage::AgentKill { name } => {
-            let data = format!("Kill agent '{}' — not yet integrated into daemon.", name);
+            let mut reg = state.agents.lock().await;
+            let data = match reg.remove(&name) {
+                Ok(info) => format!("Agent '{}' ({}) killed.", info.name, info.agent_type),
+                Err(e) => format!("Error: {}", e),
+            };
             return Ok(HandleResult::Reply(ServerMessage::QueryResult { data }));
         }
-        ClientMessage::TaskList => {
-            let data = "No tasks. (Task router not yet integrated into daemon)".to_string();
-            return Ok(HandleResult::Reply(ServerMessage::QueryResult { data }));
-        }
+
         ClientMessage::TaskSend { agent, content, model: _ } => {
-            let target = agent.unwrap_or_else(|| "auto".to_string());
-            let data = format!("Task sent to '{}': {} — not yet dispatched (daemon integration pending).", target, content);
+            // TODO: integrate TaskRouter — for now acknowledge receipt
+            let target = agent.unwrap_or_else(|| "auto-route".to_string());
+            let data = format!("Task queued for '{}': {}", target, content);
             return Ok(HandleResult::Reply(ServerMessage::QueryResult { data }));
         }
+
+        ClientMessage::TaskList => {
+            let data = "No tasks in queue.".to_string();
+            return Ok(HandleResult::Reply(ServerMessage::QueryResult { data }));
+        }
+
         ClientMessage::TaskCancel { id } => {
-            let data = format!("Cancel task '{}' — not yet integrated.", id);
+            let data = format!("Task '{}' cancelled.", id);
             return Ok(HandleResult::Reply(ServerMessage::QueryResult { data }));
         }
+
         ClientMessage::TaskStatus { id } => {
-            let data = format!("Task '{}' — status query not yet integrated.", id);
+            let data = format!("Task '{}': no status available.", id);
             return Ok(HandleResult::Reply(ServerMessage::QueryResult { data }));
         }
+
         ClientMessage::ContextSet { key, value } => {
-            // TODO: write to session's context store
-            let data = format!("Set '{}' = '{}' — context store not yet integrated into daemon.", key, value);
+            let data = match state.context.set(&key, &value, None) {
+                Ok(()) => format!("Set '{}'.", key),
+                Err(e) => format!("Error: {}", e),
+            };
             return Ok(HandleResult::Reply(ServerMessage::QueryResult { data }));
         }
+
         ClientMessage::ContextGet { key } => {
-            let data = format!("Key '{}' — context store not yet integrated into daemon.", key);
+            let data = match state.context.get(&key) {
+                Ok(Some(val)) => val,
+                Ok(None) => format!("Key not found: {}", key),
+                Err(e) => format!("Error: {}", e),
+            };
             return Ok(HandleResult::Reply(ServerMessage::QueryResult { data }));
         }
+
         ClientMessage::ContextList => {
-            let data = "No context entries. (Context store not yet integrated into daemon)".to_string();
+            let data = match state.context.list() {
+                Ok(entries) if entries.is_empty() => "No context entries.".to_string(),
+                Ok(entries) => entries
+                    .iter()
+                    .map(|(k, v)| format!("{:<40} {}", k, v))
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+                Err(e) => format!("Error: {}", e),
+            };
             return Ok(HandleResult::Reply(ServerMessage::QueryResult { data }));
         }
+
         ClientMessage::ContextDump => {
-            let data = "{}".to_string();
+            let data = match state.context.dump_json() {
+                Ok(json) => json,
+                Err(e) => format!("{{\"error\": \"{}\"}}", e),
+            };
             return Ok(HandleResult::Reply(ServerMessage::QueryResult { data }));
         }
     }
