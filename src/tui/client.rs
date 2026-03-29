@@ -155,8 +155,14 @@ pub async fn run_client(socket: PathBuf) -> Result<()> {
                             )? + "\n";
                             write_half.write_all(msg.as_bytes()).await?;
                         }
-                        MouseEventKind::Drag(MouseButton::Left)
-                        | MouseEventKind::Moved => {
+                        MouseEventKind::Drag(MouseButton::Left) => {
+                            let msg = serde_json::to_string(
+                                &ClientMessage::MouseDrag { col: mouse.column, row: mouse.row }
+                            )? + "\n";
+                            write_half.write_all(msg.as_bytes()).await?;
+                        }
+                        MouseEventKind::Moved => {
+                            // Send hover position for border highlighting + drag
                             let msg = serde_json::to_string(
                                 &ClientMessage::MouseDrag { col: mouse.column, row: mouse.row }
                             )? + "\n";

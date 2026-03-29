@@ -345,9 +345,13 @@ async fn handle_client_message(
                 *drag_left_pane = None;
             }
         }
-        ClientMessage::MouseDrag { col, row: _ } => {
+        ClientMessage::MouseDrag { col, row } => {
+            let mut sess = state.session.lock().await;
+            // Update hover for border highlighting
+            sess.active_window().set_hover(col, row);
+            // Apply drag resize if active
             if let Some(left_id) = *drag_left_pane {
-                state.session.lock().await.active_window().drag_border(left_id, col);
+                sess.active_window().drag_border(left_id, col);
             }
         }
         ClientMessage::MouseUp => {
