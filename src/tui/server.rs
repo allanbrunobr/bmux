@@ -184,12 +184,16 @@ async fn handle_client(
         | ClientMessage::ContextDump
     );
 
+    // Drag state for mouse border resize (per-client)
+    let mut drag_left_pane: Option<usize> = None;
+
     if is_cli_query {
         let result = handle_client_message(
             first_msg,
             &state,
             &mut term_rows,
             &mut term_cols,
+            &mut drag_left_pane,
         ).await?;
         if let HandleResult::Reply(response) = result {
             let json = serde_json::to_string(&response)? + "\n";
@@ -202,7 +206,7 @@ async fn handle_client(
     // ── TUI client: full interactive session ──────────────────────────────
 
     // Process the first message (Init or GetState)
-    handle_client_message(first_msg, &state, &mut term_rows, &mut term_cols).await?;
+    handle_client_message(first_msg, &state, &mut term_rows, &mut term_cols, &mut drag_left_pane).await?;
 
     // Now send initial state
     {
@@ -244,6 +248,7 @@ async fn handle_client(
                                     &state,
                                     &mut term_rows,
                                     &mut term_cols,
+                                    &mut drag_left_pane,
                                 ).await?;
                                 match result {
                                     HandleResult::Detach => {
@@ -290,6 +295,7 @@ async fn handle_client_message(
     state: &DaemonState,
     term_rows: &mut u16,
     term_cols: &mut u16,
+    drag_left_pane: &mut Option<usize>,
 ) -> Result<HandleResult> {
     // Lock session only for TUI operations (released at end of match arm)
     match msg {
@@ -330,12 +336,19 @@ async fn handle_client_message(
         }
         ClientMessage::GetState => {} // state snapshot is sent after this returns
         ClientMessage::MouseClick { col, row } => {
-            state.session.lock().await.focus_pane_at(col, row);
+            let mut sess = state.session.lock().await;
+            // Check if clicking on a border (start drag)
+            if let Some((left_id, _right_id, _border_x)) = sess.border_at(col, row) {
+                *drag_left_pane = Some(left_id);
+            } else {
+                sess.focus_pane_at(col, row);
+                *drag_left_pane = None;
+            }
         }
         ClientMessage::MouseDrag { col, row: _ } => {
-            // TODO: full drag support requires tracking drag state per-client
-            // For now, just focus the pane at the mouse position
-            state.session.lock().await.focus_pane_at(col, 0);
+            if let Some(left_id) = *drag_left_pane {
+                state.session.lock().await.active_window().drag_border(left_id, col);
+            }
         }
 
         // ═══════════════════════════════════════════════════════════════════
