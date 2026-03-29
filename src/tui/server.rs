@@ -145,21 +145,31 @@ async fn handle_client(
                         if line.is_empty() { continue; }
                         match serde_json::from_str::<ClientMessage>(&line) {
                             Ok(msg) => {
-                                let detach = handle_client_message(
+                                let result = handle_client_message(
                                     msg,
                                     &session,
                                     &mut term_rows,
                                     &mut term_cols,
                                 ).await?;
-                                if detach {
-                                    let json = serde_json::to_string(&ServerMessage::Detached)? + "\n";
-                                    write_half.write_all(json.as_bytes()).await?;
-                                    break;
+                                match result {
+                                    HandleResult::Detach => {
+                                        let json = serde_json::to_string(&ServerMessage::Detached)? + "\n";
+                                        write_half.write_all(json.as_bytes()).await?;
+                                        break;
+                                    }
+                                    HandleResult::Reply(response) => {
+                                        // CLI query — send response and close
+                                        let json = serde_json::to_string(&response)? + "\n";
+                                        write_half.write_all(json.as_bytes()).await?;
+                                        // Don't break — client will close
+                                    }
+                                    HandleResult::Ok => {
+                                        // TUI mutation — send fresh state snapshot
+                                        let snap = build_snapshot(&*session.lock().await);
+                                        let json = serde_json::to_string(&ServerMessage::State(snap))? + "\n";
+                                        write_half.write_all(json.as_bytes()).await?;
+                                    }
                                 }
-                                // After any mutation send a fresh state
-                                let snap = build_snapshot(&*session.lock().await);
-                                let json = serde_json::to_string(&ServerMessage::State(snap))? + "\n";
-                                write_half.write_all(json.as_bytes()).await?;
                             }
                             Err(e) => {
                                 tracing::debug!("Invalid client message: {e}");
@@ -173,13 +183,23 @@ async fn handle_client(
     Ok(())
 }
 
-/// Returns `true` when the client requested detach.
+/// Result of handling a client message.
+enum HandleResult {
+    /// Nothing to send back (state snapshot will be broadcast separately).
+    Ok,
+    /// Client requested detach.
+    Detach,
+    /// Send a query response back to this client only.
+    Reply(ServerMessage),
+}
+
+/// Handle one client message.
 async fn handle_client_message(
     msg: ClientMessage,
     session: &Arc<Mutex<Session>>,
     term_rows: &mut u16,
     term_cols: &mut u16,
-) -> Result<bool> {
+) -> Result<HandleResult> {
     let mut sess = session.lock().await;
     match msg {
         ClientMessage::Init { rows, cols } | ClientMessage::Resize { rows, cols } => {
@@ -191,7 +211,7 @@ async fn handle_client_message(
             sess.send_input(&data)?;
         }
         ClientMessage::Action { action } => match action {
-            Action::Detach => return Ok(true),
+            Action::Detach => return Ok(HandleResult::Detach),
             Action::SplitHorizontal => {
                 sess.active_window().split_horizontal()?;
             }
@@ -218,8 +238,64 @@ async fn handle_client_message(
             }
         },
         ClientMessage::GetState => {} // state is sent after this function returns
+
+        // ── CLI query handlers ────────────────────────────────────────────
+        ClientMessage::AgentList => {
+            // TODO: query the session's AgentRegistry and serialize
+            let data = "No agents running. (Agent registry not yet integrated into daemon)".to_string();
+            return Ok(HandleResult::Reply(ServerMessage::QueryResult { data }));
+        }
+        ClientMessage::AgentStatus { name } => {
+            let data = format!("Agent '{}': status query not yet integrated into daemon.", name);
+            return Ok(HandleResult::Reply(ServerMessage::QueryResult { data }));
+        }
+        ClientMessage::AgentSpawn { agent_type, name, model } => {
+            let data = format!(
+                "Spawning {} agent '{}' (model: {}) — not yet integrated into daemon.",
+                agent_type, name, model.unwrap_or_default()
+            );
+            return Ok(HandleResult::Reply(ServerMessage::QueryResult { data }));
+        }
+        ClientMessage::AgentKill { name } => {
+            let data = format!("Kill agent '{}' — not yet integrated into daemon.", name);
+            return Ok(HandleResult::Reply(ServerMessage::QueryResult { data }));
+        }
+        ClientMessage::TaskList => {
+            let data = "No tasks. (Task router not yet integrated into daemon)".to_string();
+            return Ok(HandleResult::Reply(ServerMessage::QueryResult { data }));
+        }
+        ClientMessage::TaskSend { agent, content, model: _ } => {
+            let target = agent.unwrap_or_else(|| "auto".to_string());
+            let data = format!("Task sent to '{}': {} — not yet dispatched (daemon integration pending).", target, content);
+            return Ok(HandleResult::Reply(ServerMessage::QueryResult { data }));
+        }
+        ClientMessage::TaskCancel { id } => {
+            let data = format!("Cancel task '{}' — not yet integrated.", id);
+            return Ok(HandleResult::Reply(ServerMessage::QueryResult { data }));
+        }
+        ClientMessage::TaskStatus { id } => {
+            let data = format!("Task '{}' — status query not yet integrated.", id);
+            return Ok(HandleResult::Reply(ServerMessage::QueryResult { data }));
+        }
+        ClientMessage::ContextSet { key, value } => {
+            // TODO: write to session's context store
+            let data = format!("Set '{}' = '{}' — context store not yet integrated into daemon.", key, value);
+            return Ok(HandleResult::Reply(ServerMessage::QueryResult { data }));
+        }
+        ClientMessage::ContextGet { key } => {
+            let data = format!("Key '{}' — context store not yet integrated into daemon.", key);
+            return Ok(HandleResult::Reply(ServerMessage::QueryResult { data }));
+        }
+        ClientMessage::ContextList => {
+            let data = "No context entries. (Context store not yet integrated into daemon)".to_string();
+            return Ok(HandleResult::Reply(ServerMessage::QueryResult { data }));
+        }
+        ClientMessage::ContextDump => {
+            let data = "{}".to_string();
+            return Ok(HandleResult::Reply(ServerMessage::QueryResult { data }));
+        }
     }
-    Ok(false)
+    Ok(HandleResult::Ok)
 }
 
 // ── Snapshot builder ──────────────────────────────────────────────────────────

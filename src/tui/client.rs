@@ -75,6 +75,9 @@ pub async fn run_client(socket: PathBuf) -> Result<()> {
                             ServerMessage::Error { msg } => {
                                 tracing::warn!("Server error: {msg}");
                             }
+                            ServerMessage::QueryResult { .. } => {
+                                // CLI query response — TUI client ignores these
+                            }
                         }
                     }
                 }

@@ -1,4 +1,5 @@
 pub mod client;
+pub mod ipc_client;
 pub mod keybindings;
 pub mod layout;
 pub mod pane;

@@ -20,6 +20,32 @@ pub enum ClientMessage {
     Action { action: Action },
     /// Request a full state snapshot (used on initial connect).
     GetState,
+
+    // ── CLI query messages (non-TUI clients) ──────────────────────────────
+    /// List all agents in this session.
+    AgentList,
+    /// Get detailed status for one agent.
+    AgentStatus { name: String },
+    /// Spawn an agent.
+    AgentSpawn { agent_type: String, name: String, model: Option<String> },
+    /// Kill an agent.
+    AgentKill { name: String },
+    /// List all tasks.
+    TaskList,
+    /// Send a task to a specific agent.
+    TaskSend { agent: Option<String>, content: String, model: Option<String> },
+    /// Cancel a queued task.
+    TaskCancel { id: String },
+    /// Get task status.
+    TaskStatus { id: String },
+    /// Set a context key-value pair.
+    ContextSet { key: String, value: String },
+    /// Get a context value.
+    ContextGet { key: String },
+    /// List all context keys.
+    ContextList,
+    /// Dump context as JSON.
+    ContextDump,
 }
 
 // ── Server → Client ───────────────────────────────────────────────────────────
@@ -33,6 +59,10 @@ pub enum ServerMessage {
     Detached,
     /// A non-fatal error message.
     Error { msg: String },
+
+    // ── CLI query responses ───────────────────────────────────────────────
+    /// JSON-encoded response to a CLI query.
+    QueryResult { data: String },
 }
 
 // ── Snapshot types ────────────────────────────────────────────────────────────
