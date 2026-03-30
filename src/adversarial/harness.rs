@@ -68,9 +68,14 @@ async fn run_inner(
     config: AdversarialConfig,
     stop: Arc<AtomicBool>,
 ) -> Result<()> {
-    // Persist config
+    // Persist config and emit started event
     persist_status(&state, AdversarialStatus::Spawning);
     persist_str(&state, "adversarial:config", &serde_json::to_string(&config)?);
+
+    let _ = events_tx.send(Arc::new(BmuxEvent::AdversarialStarted {
+        config: serde_json::to_value(&config).unwrap_or_default(),
+        total_sprints: Some(1),
+    }));
 
     // ── Story 2.1: Spawn agents ───────────────────────────────────────────────
     let (gen_pane, eval_pane) =
@@ -80,6 +85,10 @@ async fn run_inner(
 
     // ── Story 2.2: Contract negotiation ──────────────────────────────────────
     persist_status(&state, AdversarialStatus::ContractNegotiation);
+    let _ = events_tx.send(Arc::new(BmuxEvent::AdversarialNegotiating {
+        contract_proposal: serde_json::Value::Null,
+    }));
+
     let contract = negotiate_contract(&state, &config, gen_pane, eval_pane, &stop).await?;
 
     // Persist agreed contract
@@ -93,7 +102,7 @@ async fn run_inner(
 
     // ── Story 2.3: Build → evaluate loop ─────────────────────────────────────
     let result =
-        build_evaluate_loop(&state, &config, &contract, gen_pane, eval_pane, &stop).await;
+        build_evaluate_loop(&state, &config, &contract, gen_pane, eval_pane, &stop, &events_tx).await;
 
     match result {
         Ok(true) => {
@@ -292,6 +301,7 @@ async fn build_evaluate_loop(
     gen_pane: usize,
     eval_pane: usize,
     stop: &AtomicBool,
+    events_tx: &broadcast::Sender<Arc<BmuxEvent>>,
 ) -> Result<bool> {
     let contract_json = serde_json::to_string_pretty(contract)?;
     let max_retries = config.max_retries;
@@ -304,6 +314,10 @@ async fn build_evaluate_loop(
 
         // ── Generator builds ──────────────────────────────────────────────────
         persist_status(state, AdversarialStatus::Building);
+        let _ = events_tx.send(Arc::new(BmuxEvent::AdversarialBuilding {
+            sprint: 1,
+            attempt: attempt + 1,
+        }));
 
         let build_prompt = if attempt == 0 {
             format!(
@@ -354,6 +368,9 @@ async fn build_evaluate_loop(
 
         // ── Evaluator scores ──────────────────────────────────────────────────
         persist_status(state, AdversarialStatus::Evaluating);
+        let _ = events_tx.send(Arc::new(BmuxEvent::AdversarialEvaluating {
+            sprint: 1,
+        }));
 
         let eval_prompt = format!(
             "Sprint contract:\n{contract_json}\n\n\
@@ -392,6 +409,16 @@ async fn build_evaluate_loop(
             &serde_json::to_string(&eval_result.feedback)?,
         );
 
+        // Emit scores event
+        let _ = events_tx.send(Arc::new(BmuxEvent::AdversarialScores {
+            sprint: 1,
+            attempt: attempt + 1,
+            scores: eval_result.scores.iter()
+                .map(|s| serde_json::json!({"name": s.name, "score": s.score, "threshold": s.threshold}))
+                .collect(),
+            passed: eval_result.passed,
+        }));
+
         // Check pass condition: all criteria >= threshold
         let all_passed = eval_result.passed
             || eval_result.scores.iter().all(|s| s.score >= s.threshold);
@@ -409,6 +436,11 @@ async fn build_evaluate_loop(
 
         if attempt < max_retries {
             persist_status(state, AdversarialStatus::Retrying);
+            let _ = events_tx.send(Arc::new(BmuxEvent::AdversarialRetry {
+                sprint: 1,
+                attempt: attempt + 2, // next attempt number
+                feedback: eval_result.feedback.clone(),
+            }));
         }
     }
 
