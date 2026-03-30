@@ -32,12 +32,12 @@
 ## Feature 6: Multi-Sprint Timeline & ScoreBoard
 - Description: [Epic 3: Dashboard Status, Story 3.1] As a dashboard user, I want the SprintTimeline to show all N sprints with real-time status and the ScoreBoard to show per-sprint criteria scores. Source: _bmad-output/planning-artifacts/adversarial-v2-epics.md
 - Dependencies: Feature 5
-- Status: pending
+- Status: done
 
 ## Feature 7: Live Agent Terminal in Dashboard
 - Description: [Epic 3: Dashboard Status, Story 3.2] As a dashboard user, I want to see Generator and Evaluator terminal output side by side in real time via xterm.js while the loop runs. Source: _bmad-output/planning-artifacts/adversarial-v2-epics.md
 - Dependencies: Feature 6
-- Status: pending
+- Status: done
 
 ## Feature 8: Calibrated System Prompts
 - Description: [Epic 4: System Prompts, Story 4.1] As the harness, I want system prompts that maximize adversarial tension — Evaluator tries to BREAK, Generator fights to PASS. Based on adversarial-dev patterns. Source: _bmad-output/planning-artifacts/adversarial-v2-epics.md

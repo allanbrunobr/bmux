@@ -100,3 +100,41 @@ bmux-web/src/
 - No changes to `src/adversarial/`, `src/agents/`, `src/tui/` (Forbidden)
 - No changes to `bmux-web/src/components/AdversarialPanel.tsx` (wt1 owned)
 - No changes to `src/web/` (wt2 owned)
+
+---
+
+# Worktree wt3 — Adversarial v2 COMPLETE
+
+**Branch:** `bmux-adv2-wt3`
+**Completed:** 2026-03-30
+**Build:** ✅ `npm run build` passed (10/10 pages, zero errors)
+
+## Stories Delivered (Epic 3: Dashboard Multi-Sprint Status)
+
+| Story | Feature | Title | Status |
+|-------|---------|-------|--------|
+| v2-3.1 | F6 | Multi-Sprint Timeline & ScoreBoard | ✅ done |
+| v2-3.2 | F7 | Live Agent Terminal in Dashboard | ✅ done |
+
+## Key Changes
+
+```
+bmux-web/src/
+├── lib/
+│   ├── types.ts          — +SprintCriterion, SprintSpec, SprintPlan interfaces
+│   │                         +sprintPlan? to AdversarialState
+│   │                         +sprint_plan? to adversarial_started event
+│   └── store.ts          — adversarial_started stores sprint_plan from event
+├── components/
+│   ├── SprintTimeline.tsx      — +sprintPlan prop, sprint titles displayed in nodes
+│   └── AdversarialTerminals.tsx — NEW: embedded side-by-side xterm.js panels
+│                                   Generator (left) + Evaluator (right)
+│                                   reads history + live pane_output WebSocket
+└── app/adversarial/page.tsx    — +sprintPlan passed to SprintTimeline
+                                  +<AdversarialTerminals /> when loop active
+```
+
+## File Ownership Respected
+
+- No changes to `src/adversarial/` (backend — forbidden)
+- All changes within `bmux-web/src/` frontend only
