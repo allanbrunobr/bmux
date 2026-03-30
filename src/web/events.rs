@@ -37,4 +37,17 @@ pub enum BmuxEvent {
         agent: String,
         timestamp: DateTime<Utc>,
     },
+    AdversarialPassed {
+        session: String,
+        timestamp: DateTime<Utc>,
+    },
+    AdversarialFailed {
+        session: String,
+        timestamp: DateTime<Utc>,
+    },
+    AdversarialStatusChanged {
+        session: String,
+        status: String,
+        timestamp: DateTime<Utc>,
+    },
 }

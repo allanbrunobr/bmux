@@ -8,7 +8,11 @@
 /// - Broadcasts screen-state updates to all connected TUI clients
 /// - Handles CLI query messages (agent list, task send, context get, etc.)
 use anyhow::Result;
-use std::{path::PathBuf, sync::Arc, time::Duration};
+use std::{
+    path::PathBuf,
+    sync::{Arc, atomic::AtomicBool},
+    time::Duration,
+};
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
     net::{UnixListener, UnixStream},
@@ -44,6 +48,8 @@ pub(crate) struct DaemonState {
     pub ipc_socket_path: PathBuf,
     /// Broadcast channel for WebSocket event push (Story 2.1).
     pub web_events_tx: broadcast::Sender<Arc<BmuxEvent>>,
+    /// Stop signal for the adversarial harness. Set to `true` to request stop.
+    pub adversarial_stop: Arc<AtomicBool>,
 }
 
 pub struct DaemonServer {
@@ -79,6 +85,7 @@ impl DaemonServer {
                 session_name: name.to_string(),
                 ipc_socket_path,
                 web_events_tx,
+                adversarial_stop: Arc::new(AtomicBool::new(false)),
             }),
             socket_path: socket_path(name),
             meta_path: meta_path(name),

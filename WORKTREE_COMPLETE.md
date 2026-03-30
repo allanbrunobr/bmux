@@ -1,57 +1,46 @@
-# Worktree wt2 — COMPLETE
+# Worktree wt2 — Complete
 
-**Branch:** `bmux-web-wt2`
-**Completed:** 2026-03-29
+Branch: `bmux-adv-wt2`
 
-## Stories Delivered
+## Stories Implemented
 
-| Story | Title | Status |
-|-------|-------|--------|
-| 3.1 | Next.js Project Scaffold & Layout | ✅ done |
-| 3.2 | Session Selector & WebSocket Connection | ✅ done |
-| 3.3 | Agent Cards Grid | ✅ done |
-| 3.4 | Shared Context Live Feed | ✅ done |
-| 3.5 | Task Queue Table | ✅ done |
-| 3.6 | Send Task Modal | ✅ done |
+### Story 2.1 — Spawn Generator & Evaluator Agents ✅
+- `spawn_agent()` in `src/adversarial/harness.rs`
+- Creates TUI pane via `session.split_and_run_command()` (interactive bash + BMUX env vars)
+- Registers in `AgentRegistry` with role as `agent_type` ("adversarial-generator" / "adversarial-evaluator")
+- Injects `BMUX_SESSION`, `BMUX_SOCKET`, `BMUX_AGENT_NAME`, `BMUX_ADV_ROLE`
+- Emits `AgentSpawned` WebSocket event
+- Evaluator isolation: separate PTY panes, no shared context
 
-## Build Verification
+### Story 2.2 — Contract Negotiation Phase ✅
+- `negotiate_contract()` in `src/adversarial/harness.rs`
+- Generator proposes JSON `{features[], criteria[{name, description, threshold}]}`
+- Evaluator outputs `APPROVED` or tougher revised JSON (up to 2 rounds)
+- Fallback chain in `src/adversarial/parser.rs`:
+  1. Fenced code block
+  2. Brace-matched extraction
+  3. Raw JSON parse
+  4. Default contract
+- Final contract stored in `adversarial:contract`
 
-```
-npm run build → static export in bmux-web/out/
-✓ Compiled successfully (zero TypeScript errors)
-✓ 6 static routes generated
-```
+### Story 2.3 — Build → Evaluate → Feedback → Retry Loop ✅
+- `build_evaluate_loop()` in `src/adversarial/harness.rs`
+- Generator builds; Evaluator scores `{passed, scores, feedback[], overallSummary}`
+- Pass: all `score >= threshold`; Retry: any < threshold AND retries < max; Fail: exhausted
+- Runs via `tokio::spawn` (non-blocking)
+- Emits `AdversarialPassed` / `AdversarialFailed` WS events
 
-## Key Files
+### Story 2.4 — Persist Adversarial State ✅
+Context keys: `adversarial:status`, `adversarial:config`, `adversarial:contract`,
+`adversarial:attempt`, `adversarial:scores`, `adversarial:feedback`
 
-```
-bmux-web/
-├── src/lib/types.ts          — Agent, Task, ContextEntry, Metrics, BmuxEvent
-├── src/lib/bmux-client.ts    — REST client with mock fallback
-├── src/lib/store.ts          — Zustand store + WebSocket event handler
-├── src/lib/mock-data.ts      — Dev mock data
-├── src/hooks/useBmuxWebSocket.ts  — WS hook, exponential backoff reconnect
-├── src/hooks/useAgents.ts    — Agent data loader
-├── src/components/
-│   ├── AgentCard.tsx         — Agent card with type icon, status badge, tokens
-│   ├── AgentsGrid.tsx        — Responsive 1/2/3-col grid
-│   ├── ContextFeed.tsx       — Live feed, expandable values, highlight animation
-│   ├── TaskQueue.tsx         — Task table with status filter tabs
-│   ├── SendTaskModal.tsx     — POST /api/tasks modal with toast
-│   ├── SessionSelector.tsx   — Auto-selects single session
-│   ├── ConnectionStatus.tsx  — Green/red connection indicator
-│   └── BmuxProvider.tsx      — Initializes data + WebSocket
-└── src/app/                  — Dashboard, Agents, Context, Tasks, Metrics pages
-```
+### Story 2.5 — Adversarial REST API Endpoints ✅
+- `POST /api/adversarial/start` — spawns background harness task
+- `POST /api/adversarial/stop` — signals stop via AtomicBool
+- `GET /api/adversarial/status?session=X`
+- `GET /api/adversarial/history?session=X`
 
-## API Expected (Feature 4-5, wt1)
-
-- `GET /api/sessions` → `Session[]`
-- `GET /api/agents?session=<name>` → `Agent[]`
-- `GET /api/context?session=<name>` → `ContextEntry[]`
-- `GET /api/tasks?session=<name>` → `Task[]`
-- `GET /api/metrics?session=<name>` → `Metrics`
-- `POST /api/tasks` `{ session, to_agent, content }` → `{ id }`
-- `WS /ws?session=<name>` → `BmuxEvent` JSON stream
-
-Falls back to mock data automatically when backend is unavailable.
+## Build
+- `cargo build` ✅
+- `cargo build --release` ✅
+- `cargo test adversarial` ✅ (5/5 pass)

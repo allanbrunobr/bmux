@@ -1,3 +1,4 @@
+pub mod adversarial;
 pub mod agents;
 pub mod config;
 pub mod orchestration;
