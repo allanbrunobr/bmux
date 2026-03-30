@@ -3,6 +3,7 @@ import './globals.css'
 import { Sidebar } from '@/components/layout/Sidebar'
 import { Header } from '@/components/layout/Header'
 import { BmuxProvider } from '@/components/BmuxProvider'
+import { AdversarialPanelWrapper } from '@/components/AdversarialPanelWrapper'
 import { SendTaskModal } from '@/components/SendTaskModal'
 import { Toaster } from '@/components/ui/toaster'
 
@@ -24,6 +25,7 @@ export default function RootLayout({
             <Sidebar />
             <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
               <Header />
+              <AdversarialPanelWrapper />
               <main className="flex-1 overflow-y-auto p-6">
                 {children}
               </main>

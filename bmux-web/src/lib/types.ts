@@ -100,3 +100,26 @@ export interface TokenDataPoint {
   cumulative_cost_usd: number;
   [key: string]: unknown;
 }
+
+// Adversarial Mode Types
+export type AdversarialModel = 'claude-sonnet-4-20250514' | 'claude-opus-4-20250514';
+
+export const ADVERSARIAL_MODELS: AdversarialModel[] = [
+  'claude-sonnet-4-20250514',
+  'claude-opus-4-20250514',
+];
+
+export interface AdversarialStartRequest {
+  session: string;
+  generator_model: AdversarialModel;
+  evaluator_model: AdversarialModel;
+  prompt: string;
+}
+
+export interface AdversarialState {
+  isOn: boolean;
+  isRunning: boolean;
+  generatorModel: AdversarialModel;
+  evaluatorModel: AdversarialModel;
+  prompt: string;
+}
