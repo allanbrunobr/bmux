@@ -21,9 +21,9 @@ use std::time::{Duration, Instant};
 use anyhow::Result;
 use tokio::sync::broadcast;
 
-use crate::adversarial::parser::{is_approved, parse_contract, parse_evaluation};
+use crate::adversarial::parser::{is_approved, parse_contract, parse_evaluation, parse_sprint_plan};
 use crate::adversarial::types::{
-    AdversarialConfig, AdversarialStatus, EvaluationResult, SprintContract,
+    AdversarialConfig, AdversarialStatus, EvaluationResult, SprintContract, SprintPlan,
 };
 use crate::agents::adapter::AgentConfig;
 use crate::tui::server::DaemonState;
@@ -68,16 +68,46 @@ async fn run_inner(
     config: AdversarialConfig,
     stop: Arc<AtomicBool>,
 ) -> Result<()> {
-    // Persist config and emit started event
+    // Persist config
     persist_status(&state, AdversarialStatus::Spawning);
     persist_str(&state, "adversarial:config", &serde_json::to_string(&config)?);
 
+    // ── Story 1.2: Planner phase ─────────────────────────────────────────────
+    // When prd_content is provided, spawn a Planner agent to break the PRD
+    // into structured sprints before the build/evaluate loop.
+    let sprint_plan: SprintPlan = if let Some(ref prd) = config.prd_content {
+        tracing::info!("PRD content provided — running Planner agent");
+        let plan = run_planner(&state, prd, &stop).await?;
+
+        // Store sprint plan in context
+        persist_str(
+            &state,
+            "adversarial:sprint_plan",
+            &serde_json::to_string(&plan)?,
+        );
+
+        plan
+    } else {
+        // No PRD: single sprint wrapping the prompt
+        SprintPlan {
+            sprints: vec![crate::adversarial::types::PlannedSprint {
+                number: 1,
+                title: "Sprint 1".to_string(),
+                features: vec![config.prompt.clone()],
+                criteria: vec![],
+            }],
+        }
+    };
+
+    let total_sprints = sprint_plan.sprints.len() as u32;
+
+    // Emit AdversarialStarted with total_sprints from plan
     let _ = events_tx.send(Arc::new(BmuxEvent::AdversarialStarted {
         config: serde_json::to_value(&config).unwrap_or_default(),
-        total_sprints: Some(1),
+        total_sprints: Some(total_sprints),
     }));
 
-    // ── Story 2.1: Spawn agents ───────────────────────────────────────────────
+    // ── Story 2.1: Spawn generator + evaluator agents ────────────────────────
     let (gen_pane, eval_pane) =
         spawn_agents(&state, &config, &events_tx).await?;
 
@@ -89,7 +119,25 @@ async fn run_inner(
         contract_proposal: serde_json::Value::Null,
     }));
 
-    let contract = negotiate_contract(&state, &config, gen_pane, eval_pane, &stop).await?;
+    // Use first sprint's criteria to seed the contract negotiation prompt
+    let first_sprint = &sprint_plan.sprints[0];
+    let negotiation_prompt = if config.prd_content.is_some() && !first_sprint.features.is_empty() {
+        format!(
+            "Sprint 1: {}\nFeatures: {}\n\nPRD: {}",
+            first_sprint.title,
+            first_sprint.features.join(", "),
+            config.prd_content.as_deref().unwrap_or(&config.prompt),
+        )
+    } else {
+        config.prompt.clone()
+    };
+
+    let contract_config = AdversarialConfig {
+        prompt: negotiation_prompt,
+        ..config.clone()
+    };
+
+    let contract = negotiate_contract(&state, &contract_config, gen_pane, eval_pane, &stop).await?;
 
     // Persist agreed contract
     persist_str(
@@ -100,7 +148,7 @@ async fn run_inner(
 
     check_stop(&stop, &state)?;
 
-    // ── Story 2.3: Build → evaluate loop ─────────────────────────────────────
+    // ── Story 2.3: Build → evaluate loop (sprint 1 only for now) ────────────
     let result =
         build_evaluate_loop(&state, &config, &contract, gen_pane, eval_pane, &stop, &events_tx).await;
 
@@ -132,6 +180,77 @@ async fn run_inner(
     }
 
     Ok(())
+}
+
+// ── Story 1.2: Planner agent ──────────────────────────────────────────────────
+
+/// Spawn a Planner agent, send the PRD, parse and return the sprint plan.
+/// The planner pane is a throw-away bash shell that runs one `claude --print` command.
+async fn run_planner(
+    state: &DaemonState,
+    prd: &str,
+    stop: &AtomicBool,
+) -> Result<SprintPlan> {
+    const PLANNER_MODEL: &str = "claude-sonnet-4-20250514";
+
+    // Spawn a transient planner pane
+    let planner_pane = {
+        let cmd = format!(
+            "export BMUX_SESSION='{}' BMUX_SOCKET='{}' BMUX_AGENT_NAME='adversarial-planner'; \
+             exec bash --norc",
+            state.session_name,
+            state.ipc_socket_path.display(),
+        );
+        let mut sess = state.session.lock().await;
+        sess.split_and_run_command(&cmd)?
+    };
+
+    tokio::time::sleep(Duration::from_millis(800)).await;
+
+    let planner_prompt = format!(
+        "You are a product architect. Expand the following PRD into structured sprints.\n\
+         Rules:\n\
+         - Each sprint must be independently testable\n\
+         - Do NOT specify implementation details — stay at the feature/acceptance-criteria level\n\
+         - Output ONLY valid JSON, no markdown prose before or after\n\n\
+         Required JSON structure:\n\
+         {{\"sprints\": [\
+           {{\"number\": 1, \"title\": \"...\", \
+             \"features\": [\"...\"], \
+             \"criteria\": [{{\"name\": \"...\", \"description\": \"...\", \"threshold\": 7.0}}]\
+           }}\
+         ]}}\n\n\
+         PRD:\n{prd}"
+    );
+
+    let planner_response = query_agent(
+        state,
+        planner_pane,
+        PLANNER_MODEL,
+        &planner_prompt,
+        &state.session_name,
+        "planner",
+        stop,
+    )
+    .await?;
+
+    tracing::debug!(chars = planner_response.len(), "Planner response received");
+
+    let plan = parse_sprint_plan(&planner_response, prd);
+
+    tracing::info!(
+        sprints = plan.sprints.len(),
+        "Planner produced sprint plan"
+    );
+
+    // Close the planner pane — its job is done
+    {
+        let mut sess = state.session.lock().await;
+        let close_cmd = "exit\r".as_bytes();
+        let _ = sess.send_input_to_pane(planner_pane, close_cmd);
+    }
+
+    Ok(plan)
 }
 
 // ── Story 2.1: Agent spawning ─────────────────────────────────────────────────

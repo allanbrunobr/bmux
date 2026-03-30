@@ -7,12 +7,12 @@
 ## Feature 1: PRD Input in Dashboard
 - Description: [Epic 1: Planner Agent, Story 1.1] As a dashboard user, I want to paste a PRD or upload a markdown file into the adversarial panel, so that the Planner agent can break it into sprints. Source: _bmad-output/planning-artifacts/adversarial-v2-epics.md
 - Dependencies: none
-- Status: pending
+- Status: done
 
 ## Feature 2: Planner Agent Sprint Generation
 - Description: [Epic 1: Planner Agent, Story 1.2] As the daemon harness, I want a Planner agent (Sonnet) that receives a PRD and outputs structured JSON sprints with features and testable criteria per sprint. Source: _bmad-output/planning-artifacts/adversarial-v2-epics.md
 - Dependencies: Feature 1
-- Status: pending
+- Status: done
 
 ## Feature 3: Multi-Sprint Loop in Harness
 - Description: [Epic 2: Multi-Sprint Loop, Story 2.1] As the daemon harness, I want to iterate through all N sprints: contract negotiation → build → evaluate → retry per sprint, stopping if any sprint fails 3x. Source: _bmad-output/planning-artifacts/adversarial-v2-epics.md

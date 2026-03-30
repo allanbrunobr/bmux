@@ -6,7 +6,7 @@
 
 use serde_json::Value;
 
-use crate::adversarial::types::{Criterion, CriterionScore, EvaluationResult, SprintContract};
+use crate::adversarial::types::{Criterion, CriterionScore, EvaluationResult, PlannedSprint, SprintContract, SprintPlan};
 
 // ── Public extraction API ─────────────────────────────────────────────────────
 
@@ -123,6 +123,99 @@ pub fn parse_evaluation(text: &str) -> EvaluationResult {
         .to_string();
 
     EvaluationResult { passed, scores, feedback, overall_summary }
+}
+
+/// Parse a SprintPlan from Planner agent output.
+///
+/// Expects JSON: `{ "sprints": [{ "number", "title", "features": [], "criteria": [] }] }`
+/// Falls back to a single sprint containing the full PRD text if parsing fails.
+pub fn parse_sprint_plan(text: &str, prd_fallback: &str) -> SprintPlan {
+    if let Some(val) = extract_json(text) {
+        if let Ok(plan) = serde_json::from_value::<SprintPlan>(val.clone()) {
+            if !plan.sprints.is_empty() {
+                return plan;
+            }
+        }
+
+        // Manual extraction: handle minor structural variations
+        if let Some(sprints_arr) = val.get("sprints").and_then(|v| v.as_array()) {
+            let sprints: Vec<PlannedSprint> = sprints_arr
+                .iter()
+                .enumerate()
+                .filter_map(|(i, s)| {
+                    let number = s
+                        .get("number")
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or((i + 1) as u64) as u32;
+                    let title = s
+                        .get("title")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("Sprint")
+                        .to_string();
+                    let features: Vec<String> = s
+                        .get("features")
+                        .and_then(|v| v.as_array())
+                        .map(|arr| {
+                            arr.iter()
+                                .filter_map(|f| f.as_str().map(|s| s.to_string()))
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    let criteria: Vec<Criterion> = s
+                        .get("criteria")
+                        .and_then(|v| v.as_array())
+                        .map(|arr| {
+                            arr.iter()
+                                .filter_map(|c| {
+                                    let name = c.get("name")?.as_str()?.to_string();
+                                    let description = c
+                                        .get("description")
+                                        .and_then(|v| v.as_str())
+                                        .unwrap_or("criterion")
+                                        .to_string();
+                                    let threshold =
+                                        c.get("threshold").and_then(|v| v.as_f64()).unwrap_or(7.0);
+                                    Some(Criterion { name, description, threshold })
+                                })
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    Some(PlannedSprint { number, title, features, criteria })
+                })
+                .collect();
+
+            if !sprints.is_empty() {
+                return SprintPlan { sprints };
+            }
+        }
+    }
+
+    // Fallback: single sprint with full PRD and 3 default criteria
+    SprintPlan {
+        sprints: vec![PlannedSprint {
+            number: 1,
+            title: "Sprint 1".to_string(),
+            features: vec![prd_fallback.to_string()],
+            criteria: vec![
+                Criterion {
+                    name: "functionality".to_string(),
+                    description: "Core functionality works as specified".to_string(),
+                    threshold: 7.0,
+                },
+                Criterion {
+                    name: "code_quality".to_string(),
+                    description: "Code is clean, well-structured, and follows best practices"
+                        .to_string(),
+                    threshold: 7.0,
+                },
+                Criterion {
+                    name: "tests_passing".to_string(),
+                    description: "All tests pass and edge cases are handled".to_string(),
+                    threshold: 7.0,
+                },
+            ],
+        }],
+    }
 }
 
 /// Check if the evaluator approved the contract without revision.
