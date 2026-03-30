@@ -1,4 +1,4 @@
-import type { Agent, ContextEntry, Task, Session, Metrics } from './types';
+import type { Agent, ContextEntry, Task, Session, Metrics, AdversarialStartRequest } from './types';
 import {
   getMockSessions,
   getMockAgents,
@@ -84,6 +84,38 @@ export class BmuxClient {
       const mockId = `task-${Math.random().toString(36).substring(2, 8)}`;
       console.warn(`[BmuxClient] sendTask failed, returning mock id ${mockId}`, err);
       return { id: mockId };
+    }
+  }
+
+  async startAdversarialLoop(req: AdversarialStartRequest): Promise<{ ok: boolean }> {
+    try {
+      const res = await fetch(`${API_BASE}/api/adversarial/start`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(req),
+        signal: AbortSignal.timeout(10000),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return { ok: true };
+    } catch (err) {
+      console.warn('[BmuxClient] startAdversarialLoop failed', err);
+      return { ok: false };
+    }
+  }
+
+  async stopAdversarialLoop(session: string): Promise<{ ok: boolean }> {
+    try {
+      const res = await fetch(`${API_BASE}/api/adversarial/stop`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session }),
+        signal: AbortSignal.timeout(10000),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return { ok: true };
+    } catch (err) {
+      console.warn('[BmuxClient] stopAdversarialLoop failed', err);
+      return { ok: false };
     }
   }
 }

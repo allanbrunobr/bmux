@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { Agent, ContextEntry, Task, Session, Metrics, BmuxEvent } from './types';
+import type { Agent, ContextEntry, Task, Session, Metrics, BmuxEvent, AdversarialModel } from './types';
 
 interface BmuxStore {
   // Session
@@ -30,6 +30,18 @@ interface BmuxStore {
 
   // WebSocket event handler
   handleEvent: (event: BmuxEvent) => void;
+
+  // Adversarial Mode
+  adversarialOn: boolean;
+  adversarialRunning: boolean;
+  generatorModel: AdversarialModel;
+  evaluatorModel: AdversarialModel;
+  adversarialPrompt: string;
+  setAdversarialOn: (on: boolean) => void;
+  setAdversarialRunning: (running: boolean) => void;
+  setGeneratorModel: (model: AdversarialModel) => void;
+  setEvaluatorModel: (model: AdversarialModel) => void;
+  setAdversarialPrompt: (prompt: string) => void;
 
   // UI
   sendTaskTarget: string | null;
@@ -123,6 +135,18 @@ export const useBmuxStore = create<BmuxStore>((set, get) => ({
         break;
     }
   },
+
+  // Adversarial Mode
+  adversarialOn: false,
+  adversarialRunning: false,
+  generatorModel: 'claude-sonnet-4-20250514',
+  evaluatorModel: 'claude-opus-4-20250514',
+  adversarialPrompt: '',
+  setAdversarialOn: (on) => set({ adversarialOn: on }),
+  setAdversarialRunning: (running) => set({ adversarialRunning: running }),
+  setGeneratorModel: (model) => set({ generatorModel: model }),
+  setEvaluatorModel: (model) => set({ evaluatorModel: model }),
+  setAdversarialPrompt: (prompt) => set({ adversarialPrompt: prompt }),
 
   // UI
   sendTaskTarget: null,
