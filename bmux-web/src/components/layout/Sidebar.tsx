@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { LayoutDashboard, Bot, Database, ListTodo, BarChart3, Terminal } from 'lucide-react'
+import { LayoutDashboard, Bot, Database, ListTodo, BarChart3, Terminal, Swords } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 const navItems = [
@@ -11,6 +11,7 @@ const navItems = [
   { href: '/context', label: 'Context', icon: Database },
   { href: '/tasks', label: 'Tasks', icon: ListTodo },
   { href: '/metrics', label: 'Metrics', icon: BarChart3 },
+  { href: '/adversarial', label: 'Adversarial', icon: Swords },
 ]
 
 export function Sidebar() {
