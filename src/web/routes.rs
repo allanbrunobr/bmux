@@ -544,11 +544,14 @@ pub async fn get_audit(
 #[derive(Deserialize)]
 pub struct AdversarialStartBody {
     pub session: Option<String>,
-    pub prompt: String,
+    pub prompt: Option<String>,
     pub generator_model: String,
     pub evaluator_model: String,
     pub max_retries: Option<u32>,
     pub multi_sprint: Option<bool>,
+    /// PRD content to pass to the Planner agent (Story 1.1).
+    /// When present, the harness spawns a Planner before the build/evaluate loop.
+    pub prd_content: Option<String>,
 }
 
 /// POST /api/adversarial/start — spawn harness as background task, return immediately.
@@ -557,10 +560,11 @@ pub async fn post_adversarial_start(
     Json(body): Json<AdversarialStartBody>,
 ) -> Response {
     let config = AdversarialConfig {
-        prompt: body.prompt,
+        prompt: body.prompt.unwrap_or_default(),
         generator_model: body.generator_model,
         evaluator_model: body.evaluator_model,
         max_retries: body.max_retries.unwrap_or(3),
+        prd_content: body.prd_content,
     };
 
     // Reset stop flag so a fresh run can proceed
