@@ -92,6 +92,7 @@ pub struct PostTaskBody {
 
 #[derive(Serialize)]
 pub struct PostTaskResponse {
+    pub id: String,
     pub task_id: String,
     pub status: String,
 }
@@ -168,7 +169,11 @@ pub async fn get_agents(
             uptime_seconds: a.uptime_seconds(),
             pane_id: a.pane_id,
             last_task: a.last_task.clone(),
-            spawned_at: chrono::Utc::now().to_rfc3339(),
+            spawned_at: {
+                // Convert monotonic Instant to wall-clock DateTime
+                let elapsed = a.spawned_at.elapsed();
+                (chrono::Utc::now() - chrono::Duration::from_std(elapsed).unwrap_or_default()).to_rfc3339()
+            },
         })
         .collect();
 
@@ -226,7 +231,7 @@ pub async fn get_tasks(
             content: t.content,
             status: t.status.to_string(),
             submitted_at: t.submitted_at.to_rfc3339(),
-            completed_at: t.result.as_ref().map(|_| chrono::Utc::now().to_rfc3339()),
+            completed_at: t.result.as_ref().map(|r| r.completed_at.to_rfc3339()),
             cost_usd: t.result.as_ref().map(|r| r.cost_usd),
         })
         .collect();
@@ -361,6 +366,7 @@ pub async fn post_task(
     }));
 
     Json(PostTaskResponse {
+        id: task_id.clone(),
         task_id,
         status,
     })
