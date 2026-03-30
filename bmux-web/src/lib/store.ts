@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { Agent, ContextEntry, Task, Session, Metrics, BmuxEvent, AdversarialModel } from './types';
+import type { Agent, ContextEntry, Task, Session, Metrics, BmuxEvent, AdversarialState } from './types';
 
 interface BmuxStore {
   // Session
@@ -31,17 +31,9 @@ interface BmuxStore {
   // WebSocket event handler
   handleEvent: (event: BmuxEvent) => void;
 
-  // Adversarial Mode
-  adversarialOn: boolean;
-  adversarialRunning: boolean;
-  generatorModel: AdversarialModel;
-  evaluatorModel: AdversarialModel;
-  adversarialPrompt: string;
-  setAdversarialOn: (on: boolean) => void;
-  setAdversarialRunning: (running: boolean) => void;
-  setGeneratorModel: (model: AdversarialModel) => void;
-  setEvaluatorModel: (model: AdversarialModel) => void;
-  setAdversarialPrompt: (prompt: string) => void;
+  // Adversarial
+  adversarial: AdversarialState | null;
+  setAdversarial: (state: AdversarialState | null) => void;
 
   // UI
   sendTaskTarget: string | null;
@@ -74,6 +66,10 @@ export const useBmuxStore = create<BmuxStore>((set, get) => ({
   // Metrics
   metrics: null,
   setMetrics: (m) => set({ metrics: m }),
+
+  // Adversarial
+  adversarial: null,
+  setAdversarial: (state) => set({ adversarial: state }),
 
   // WebSocket event handler
   handleEvent: (event) => {
@@ -131,22 +127,96 @@ export const useBmuxStore = create<BmuxStore>((set, get) => ({
         set({ metrics: event.metrics });
         break;
 
+      case 'adversarial_started': {
+        set({
+          adversarial: {
+            phase: 'negotiating',
+            sprint: 1,
+            totalSprints: event.total_sprints ?? 1,
+            attempt: 1,
+            maxAttempts: event.config.max_retries,
+            scores: [],
+            history: [],
+            config: event.config,
+          },
+        });
+        break;
+      }
+
+      case 'adversarial_negotiating': {
+        const cur = get().adversarial;
+        if (cur) set({ adversarial: { ...cur, phase: 'negotiating' } });
+        break;
+      }
+
+      case 'adversarial_building': {
+        const cur = get().adversarial;
+        if (cur) set({ adversarial: { ...cur, phase: 'building', sprint: event.sprint, attempt: event.attempt } });
+        break;
+      }
+
+      case 'adversarial_evaluating': {
+        const cur = get().adversarial;
+        if (cur) set({ adversarial: { ...cur, phase: 'evaluating', sprint: event.sprint } });
+        break;
+      }
+
+      case 'adversarial_scores': {
+        const cur = get().adversarial;
+        if (cur) {
+          const attempt: import('./types').SprintAttempt = {
+            sprint: event.sprint,
+            attempt: event.attempt,
+            scores: event.scores,
+            passed: event.passed,
+            feedback: [],
+          };
+          set({
+            adversarial: {
+              ...cur,
+              scores: event.scores,
+              history: [...cur.history, attempt],
+            },
+          });
+        }
+        break;
+      }
+
+      case 'adversarial_retry': {
+        const cur = get().adversarial;
+        if (cur) {
+          const updated = cur.history.map((h) =>
+            h.sprint === event.sprint && h.attempt === event.attempt
+              ? { ...h, feedback: event.feedback }
+              : h
+          );
+          set({ adversarial: { ...cur, phase: 'building', attempt: event.attempt, history: updated } });
+        }
+        break;
+      }
+
+      case 'adversarial_sprint_passed': {
+        const cur = get().adversarial;
+        if (cur) set({ adversarial: { ...cur, phase: 'passed', sprint: event.sprint } });
+        break;
+      }
+
+      case 'adversarial_failed': {
+        const cur = get().adversarial;
+        if (cur) set({ adversarial: { ...cur, phase: 'failed' } });
+        break;
+      }
+
+      case 'adversarial_complete': {
+        const cur = get().adversarial;
+        if (cur) set({ adversarial: { ...cur, phase: 'complete' } });
+        break;
+      }
+
       default:
         break;
     }
   },
-
-  // Adversarial Mode
-  adversarialOn: false,
-  adversarialRunning: false,
-  generatorModel: 'claude-sonnet-4-20250514',
-  evaluatorModel: 'claude-opus-4-20250514',
-  adversarialPrompt: '',
-  setAdversarialOn: (on) => set({ adversarialOn: on }),
-  setAdversarialRunning: (running) => set({ adversarialRunning: running }),
-  setGeneratorModel: (model) => set({ generatorModel: model }),
-  setEvaluatorModel: (model) => set({ evaluatorModel: model }),
-  setAdversarialPrompt: (prompt) => set({ adversarialPrompt: prompt }),
 
   // UI
   sendTaskTarget: null,

@@ -59,6 +59,49 @@ export interface Metrics {
   uptime_seconds: number;
 }
 
+export type AdversarialPhase =
+  | 'negotiating'
+  | 'building'
+  | 'evaluating'
+  | 'passed'
+  | 'failed'
+  | 'complete';
+
+export interface EvaluationScore {
+  criterion: string;
+  score: number;
+  threshold: number;
+  passed: boolean;
+  details?: string;
+}
+
+export interface SprintAttempt {
+  sprint: number;
+  attempt: number;
+  scores: EvaluationScore[];
+  passed: boolean;
+  feedback: string[];
+}
+
+export interface AdversarialConfig {
+  generator_model: string;
+  evaluator_model: string;
+  prompt: string;
+  threshold: number;
+  max_retries: number;
+}
+
+export interface AdversarialState {
+  phase: AdversarialPhase;
+  sprint: number;
+  totalSprints: number;
+  attempt: number;
+  maxAttempts: number;
+  scores: EvaluationScore[];
+  history: SprintAttempt[];
+  config: AdversarialConfig | null;
+}
+
 export type BmuxEvent =
   | { type: 'agent_spawned'; agent: Agent }
   | { type: 'agent_killed'; agent_id: string }
@@ -69,7 +112,16 @@ export type BmuxEvent =
   | { type: 'task_updated'; task: Task }
   | { type: 'metrics_updated'; metrics: Metrics }
   | { type: 'pane_output'; pane_id: number; data: string }
-  | { type: 'audit_event'; entry: AuditEntry };
+  | { type: 'audit_event'; entry: AuditEntry }
+  | { type: 'adversarial_started'; config: AdversarialConfig; total_sprints?: number }
+  | { type: 'adversarial_negotiating'; contract_proposal: Record<string, unknown> }
+  | { type: 'adversarial_building'; sprint: number; attempt: number }
+  | { type: 'adversarial_evaluating'; sprint: number }
+  | { type: 'adversarial_scores'; sprint: number; attempt: number; scores: EvaluationScore[]; passed: boolean }
+  | { type: 'adversarial_retry'; sprint: number; attempt: number; feedback: string[] }
+  | { type: 'adversarial_sprint_passed'; sprint: number; total_attempts: number }
+  | { type: 'adversarial_failed'; sprint: number; reason: string }
+  | { type: 'adversarial_complete'; sprints_passed: number; total_duration_ms: number };
 
 export interface AuditEntry {
   id: string;

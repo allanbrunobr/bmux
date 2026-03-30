@@ -47,24 +47,24 @@
 ## Feature 9: Adversarial Status Panel
 - Description: [Epic 3: Dashboard Status, Story 3.1] As a dashboard user, I want to see live adversarial loop status: current phase badge, sprint counter, attempt counter, progress bar. Source: _bmad-output/planning-artifacts/adversarial-mode-epics.md
 - Dependencies: Feature 8
-- Status: pending
+- Status: done
 
 ## Feature 10: Score Board & Evaluation History
 - Description: [Epic 3: Dashboard Status, Story 3.2] As a dashboard user, I want to see scores per criterion with pass/fail badges and full evaluation history across all attempts. Source: _bmad-output/planning-artifacts/adversarial-mode-epics.md
 - Dependencies: Feature 9
-- Status: pending
+- Status: done
 
 ## Feature 11: Adversarial WebSocket Events
 - Description: [Epic 3: Dashboard Status, Story 3.3] As a developer, I want the daemon to emit typed WebSocket events for all adversarial state changes (started, negotiating, building, evaluating, scores, retry, passed, failed, complete). Source: _bmad-output/planning-artifacts/adversarial-mode-epics.md
 - Dependencies: Feature 10
-- Status: pending
+- Status: done
 
 ## Feature 12: Planner Agent Integration
 - Description: [Epic 4: Multi-Sprint Planning, Story 4.1] [v1.0] As a user, I want a 3rd Planner agent that expands a short prompt into a full spec with multiple sprints for long-running adversarial sessions. Source: _bmad-output/planning-artifacts/adversarial-mode-epics.md
 - Dependencies: Feature 8
-- Status: pending
+- Status: done
 
 ## Feature 13: Sprint Progress Dashboard
 - Description: [Epic 4: Multi-Sprint Planning, Story 4.2] [v1.0] As a dashboard user, I want a horizontal timeline showing all sprints with pass/fail status and click-to-expand evaluation details. Source: _bmad-output/planning-artifacts/adversarial-mode-epics.md
 - Dependencies: Feature 12
-- Status: pending
+- Status: done
