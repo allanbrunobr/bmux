@@ -33,14 +33,14 @@ pub struct SessionParam {
 
 // ── Response shapes ───────────────────────────────────────────────────────────
 
-#[derive(Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct SessionInfo {
     pub name: String,
     pub agents: usize,
     pub created_at: String,
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct AgentInfo {
     pub id: String,
     pub name: String,
@@ -55,15 +55,15 @@ pub struct AgentInfo {
     pub spawned_at: String,
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct ContextEntryJson {
     pub key: String,
     pub value: String,
-    pub created_at: u64,
-    pub expires_at: Option<u64>,
+    pub timestamp: String,
+    pub session: String,
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct TaskJson {
     pub id: String,
     pub from_agent: String,
@@ -75,7 +75,7 @@ pub struct TaskJson {
     pub cost_usd: Option<f64>,
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct MetricsJson {
     pub total_tokens: u64,
     pub total_cost_usd: f64,
@@ -92,7 +92,7 @@ pub struct PostTaskBody {
     pub content: String,
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct PostTaskResponse {
     pub id: String,
     pub task_id: String,
@@ -199,8 +199,10 @@ pub async fn get_context(
                 .map(|e| ContextEntryJson {
                     key: e.key,
                     value: e.value,
-                    created_at: e.created_at,
-                    expires_at: e.expires_at,
+                    timestamp: chrono::DateTime::from_timestamp(e.created_at as i64, 0)
+                        .unwrap_or_default()
+                        .to_rfc3339(),
+                    session: state.daemon.session_name.clone(),
                 })
                 .collect();
             Json(json).into_response()
@@ -350,7 +352,7 @@ pub async fn post_task(
             if let Some(info) = reg.get(target) {
                 if let Some(pane_id) = info.pane_id {
                     let mut sess = state.daemon.session.lock().await;
-                    let mut input = body.content.into_bytes();
+                    let mut input = body.content.clone().into_bytes();
                     input.push(b'\r');
                     let _ = sess.send_input_to_pane(pane_id, &input);
                 }
@@ -358,13 +360,18 @@ pub async fn post_task(
         }
     }
 
-    // Emit TaskDispatched event
-    let _ = state.events_tx.send(Arc::new(BmuxEvent::TaskDispatched {
-        session: state.daemon.session_name.clone(),
-        task_id: task_id.clone(),
-        agent: target_agent.unwrap_or_default(),
-        content: String::new(), // omit content from event for brevity
-        timestamp: Utc::now(),
+    // Emit TaskCreated event
+    let _ = state.events_tx.send(Arc::new(BmuxEvent::TaskCreated {
+        task: TaskJson {
+            id: task_id.clone(),
+            from_agent: "user".to_string(),
+            to_agent: target_agent.unwrap_or_default(),
+            content: body.content.clone(),
+            status: status.clone(),
+            submitted_at: Utc::now().to_rfc3339(),
+            completed_at: None,
+            cost_usd: None,
+        },
     }));
 
     Json(PostTaskResponse {
@@ -536,10 +543,12 @@ pub async fn get_audit(
 /// Request body for POST /api/adversarial/start
 #[derive(Deserialize)]
 pub struct AdversarialStartBody {
+    pub session: Option<String>,
     pub prompt: String,
     pub generator_model: String,
     pub evaluator_model: String,
     pub max_retries: Option<u32>,
+    pub multi_sprint: Option<bool>,
 }
 
 /// POST /api/adversarial/start — spawn harness as background task, return immediately.

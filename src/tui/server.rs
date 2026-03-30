@@ -474,13 +474,21 @@ async fn handle_client_message(
                 idle_since: Some(std::time::Instant::now()),
             }).await;
 
-            // Emit AgentSpawned event (Story 2.2)
+            // Emit AgentSpawned event
             let _ = state.web_events_tx.send(Arc::new(BmuxEvent::AgentSpawned {
-                session: state.session_name.clone(),
-                agent_name: name.clone(),
-                agent_type: agent_type.clone(),
-                pane_id,
-                timestamp: chrono::Utc::now(),
+                agent: crate::web::routes::AgentInfo {
+                    id: name.clone(),
+                    name: name.clone(),
+                    agent_type: agent_type.clone(),
+                    model: model_name.clone(),
+                    status: "idle".to_string(),
+                    tokens_used: 0,
+                    cost_usd: 0.0,
+                    uptime_seconds: 0,
+                    pane_id: Some(pane_id),
+                    last_task: None,
+                    spawned_at: chrono::Utc::now().to_rfc3339(),
+                },
             }));
 
             let data = format!(
@@ -549,11 +557,8 @@ async fn handle_client_message(
             let data = match reg.remove(&name) {
                 Ok(info) => {
                     state.task_router.handle_agent_crash(&name).await;
-                    // Emit AgentKilled event (Story 2.2)
                     let _ = state.web_events_tx.send(Arc::new(BmuxEvent::AgentKilled {
-                        session: state.session_name.clone(),
-                        agent_name: info.name.clone(),
-                        timestamp: chrono::Utc::now(),
+                        agent_id: info.name.clone(),
                     }));
                     format!("Agent '{}' ({}) killed.", info.name, info.agent_type)
                 }
@@ -592,15 +597,28 @@ async fn handle_client_message(
                 }
             };
 
-            // Deliver the task content to the agent's pane PTY stdin.
-            // Use \r (carriage return) to simulate pressing Enter in the terminal.
-            // PTYs treat \r as the Enter key, not \n.
+            // Emit TaskCreated event first (before content is moved)
+            if let Some(ref target) = target_agent {
+                let _ = state.web_events_tx.send(Arc::new(BmuxEvent::TaskCreated {
+                    task: crate::web::routes::TaskJson {
+                        id: "pending".to_string(),
+                        from_agent: "user".to_string(),
+                        to_agent: target.clone(),
+                        content: content.clone(),
+                        status: "active".to_string(),
+                        submitted_at: chrono::Utc::now().to_rfc3339(),
+                        completed_at: None,
+                        cost_usd: None,
+                    },
+                }));
+            }
+
+            // Deliver the task content to the agent's pane PTY stdin
             if let Some(target) = target_agent {
                 let reg = state.agents.lock().await;
                 if let Some(info) = reg.get(&target) {
                     if let Some(pane_id) = info.pane_id {
                         let mut sess = state.session.lock().await;
-                        // Write content + carriage return (Enter key)
                         let mut input = content.into_bytes();
                         input.push(b'\r');
                         if let Err(e) = sess.send_input_to_pane(pane_id, &input) {
@@ -608,17 +626,6 @@ async fn handle_client_message(
                         }
                     }
                 }
-            }
-
-            // Emit TaskDispatched event (Story 2.2)
-            if let Some(ref agent_name) = agent {
-                let _ = state.web_events_tx.send(Arc::new(BmuxEvent::TaskDispatched {
-                    session: state.session_name.clone(),
-                    task_id: data.split("task_id: ").nth(1).unwrap_or("").trim_end_matches(')').to_string(),
-                    agent: agent_name.clone(),
-                    content: String::new(),
-                    timestamp: chrono::Utc::now(),
-                }));
             }
 
             return Ok(HandleResult::Reply(ServerMessage::QueryResult { data }));
@@ -672,12 +679,13 @@ async fn handle_client_message(
         ClientMessage::ContextSet { key, value } => {
             let data = match state.context.set(&key, &value, None) {
                 Ok(()) => {
-                    // Emit ContextUpdated event (Story 2.2)
                     let _ = state.web_events_tx.send(Arc::new(BmuxEvent::ContextUpdated {
-                        session: state.session_name.clone(),
-                        key: key.clone(),
-                        value: value.clone(),
-                        timestamp: chrono::Utc::now(),
+                        entry: crate::web::routes::ContextEntryJson {
+                            key: key.clone(),
+                            value: value.clone(),
+                            timestamp: chrono::Utc::now().to_rfc3339(),
+                            session: state.session_name.clone(),
+                        },
                     }));
                     format!("Set '{}'.", key)
                 }

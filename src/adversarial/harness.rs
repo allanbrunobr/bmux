@@ -98,16 +98,20 @@ async fn run_inner(
     match result {
         Ok(true) => {
             persist_status(&state, AdversarialStatus::Passed);
-            let _ = events_tx.send(Arc::new(BmuxEvent::AdversarialPassed {
-                session: state.session_name.clone(),
-                timestamp: chrono::Utc::now(),
+            let _ = events_tx.send(Arc::new(BmuxEvent::AdversarialSprintPassed {
+                sprint: 1,
+                total_attempts: config.max_retries,
+            }));
+            let _ = events_tx.send(Arc::new(BmuxEvent::AdversarialComplete {
+                sprints_passed: 1,
+                total_duration_ms: 0,
             }));
         }
         Ok(false) => {
             persist_status(&state, AdversarialStatus::Failed);
             let _ = events_tx.send(Arc::new(BmuxEvent::AdversarialFailed {
-                session: state.session_name.clone(),
-                timestamp: chrono::Utc::now(),
+                sprint: 1,
+                reason: "Evaluation failed after max retries".to_string(),
             }));
         }
         Err(e) if e.to_string().contains("Stopped") => {
@@ -181,11 +185,19 @@ async fn spawn_agent(
 
     // Emit AgentSpawned event
     let _ = events_tx.send(Arc::new(BmuxEvent::AgentSpawned {
-        session: state.session_name.clone(),
-        agent_name: name,
-        agent_type,
-        pane_id,
-        timestamp: chrono::Utc::now(),
+        agent: crate::web::routes::AgentInfo {
+            id: name.clone(),
+            name,
+            agent_type,
+            model: model.to_string(),
+            status: "idle".to_string(),
+            tokens_used: 0,
+            cost_usd: 0.0,
+            uptime_seconds: 0,
+            pane_id: Some(pane_id),
+            last_task: None,
+            spawned_at: chrono::Utc::now().to_rfc3339(),
+        },
     }));
 
     tracing::info!(role = %role, pane = pane_id, model = %model, "Adversarial agent spawned");
