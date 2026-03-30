@@ -1,20 +1,15 @@
 {
   "generated": "2026-03-30",
-  "source_epics_file": "_bmad-output/planning-artifacts/adversarial-mode-epics.md",
+  "source_epics_file": "_bmad-output/planning-artifacts/adversarial-v2-epics.md",
   "project_context_file": null,
   "mappings": [
-    { "feature_number": 1, "epic_number": 1, "story_number": 1, "epic_title": "Dashboard — Adversarial Mode Controls", "story_title": "Adversarial Mode Toggle", "story_file": null, "bmad_status": "ready-for-dev", "hive_status": "pending" },
-    { "feature_number": 2, "epic_number": 1, "story_number": 2, "epic_title": "Dashboard — Adversarial Mode Controls", "story_title": "Model Selector for Generator & Evaluator", "story_file": null, "bmad_status": "ready-for-dev", "hive_status": "pending" },
-    { "feature_number": 3, "epic_number": 1, "story_number": 3, "epic_title": "Dashboard — Adversarial Mode Controls", "story_title": "Adversarial Prompt Input & Start", "story_file": null, "bmad_status": "ready-for-dev", "hive_status": "pending" },
-    { "feature_number": 4, "epic_number": 2, "story_number": 1, "epic_title": "Backend — Adversarial Harness Loop", "story_title": "Spawn Generator & Evaluator Agents", "story_file": null, "bmad_status": "ready-for-dev", "hive_status": "pending" },
-    { "feature_number": 5, "epic_number": 2, "story_number": 2, "epic_title": "Backend — Adversarial Harness Loop", "story_title": "Contract Negotiation Phase", "story_file": null, "bmad_status": "ready-for-dev", "hive_status": "pending" },
-    { "feature_number": 6, "epic_number": 2, "story_number": 3, "epic_title": "Backend — Adversarial Harness Loop", "story_title": "Build → Evaluate → Feedback → Retry Loop", "story_file": null, "bmad_status": "ready-for-dev", "hive_status": "pending" },
-    { "feature_number": 7, "epic_number": 2, "story_number": 4, "epic_title": "Backend — Adversarial Harness Loop", "story_title": "Persist Adversarial State in Context Store", "story_file": null, "bmad_status": "ready-for-dev", "hive_status": "pending" },
-    { "feature_number": 8, "epic_number": 2, "story_number": 5, "epic_title": "Backend — Adversarial Harness Loop", "story_title": "Adversarial REST API Endpoints", "story_file": null, "bmad_status": "ready-for-dev", "hive_status": "pending" },
-    { "feature_number": 9, "epic_number": 3, "story_number": 1, "epic_title": "Dashboard — Real-Time Adversarial Status", "story_title": "Adversarial Status Panel", "story_file": null, "bmad_status": "ready-for-dev", "hive_status": "pending" },
-    { "feature_number": 10, "epic_number": 3, "story_number": 2, "epic_title": "Dashboard — Real-Time Adversarial Status", "story_title": "Score Board & Evaluation History", "story_file": null, "bmad_status": "ready-for-dev", "hive_status": "pending" },
-    { "feature_number": 11, "epic_number": 3, "story_number": 3, "epic_title": "Dashboard — Real-Time Adversarial Status", "story_title": "Adversarial WebSocket Events", "story_file": null, "bmad_status": "ready-for-dev", "hive_status": "pending" },
-    { "feature_number": 12, "epic_number": 4, "story_number": 1, "epic_title": "Advanced — Multi-Sprint Planning", "story_title": "Planner Agent Integration", "story_file": null, "bmad_status": "ready-for-dev", "hive_status": "pending" },
-    { "feature_number": 13, "epic_number": 4, "story_number": 2, "epic_title": "Advanced — Multi-Sprint Planning", "story_title": "Sprint Progress Dashboard", "story_file": null, "bmad_status": "ready-for-dev", "hive_status": "pending" }
+    { "feature_number": 1, "epic_number": 1, "story_number": 1, "epic_title": "Planner Agent — PRD to Sprints", "story_title": "PRD Input in Dashboard", "story_file": null, "bmad_status": "ready-for-dev", "hive_status": "pending" },
+    { "feature_number": 2, "epic_number": 1, "story_number": 2, "epic_title": "Planner Agent — PRD to Sprints", "story_title": "Planner Agent Sprint Generation", "story_file": null, "bmad_status": "ready-for-dev", "hive_status": "pending" },
+    { "feature_number": 3, "epic_number": 2, "story_number": 1, "epic_title": "Multi-Sprint Adversarial Loop", "story_title": "Multi-Sprint Loop in Harness", "story_file": null, "bmad_status": "ready-for-dev", "hive_status": "pending" },
+    { "feature_number": 4, "epic_number": 2, "story_number": 2, "epic_title": "Multi-Sprint Adversarial Loop", "story_title": "Evaluator with Real Tools", "story_file": null, "bmad_status": "ready-for-dev", "hive_status": "pending" },
+    { "feature_number": 5, "epic_number": 2, "story_number": 3, "epic_title": "Multi-Sprint Adversarial Loop", "story_title": "Git Commits per Feature", "story_file": null, "bmad_status": "ready-for-dev", "hive_status": "pending" },
+    { "feature_number": 6, "epic_number": 3, "story_number": 1, "epic_title": "Dashboard — Multi-Sprint Status & Agent Terminals", "story_title": "Multi-Sprint Timeline & ScoreBoard", "story_file": null, "bmad_status": "ready-for-dev", "hive_status": "pending" },
+    { "feature_number": 7, "epic_number": 3, "story_number": 2, "epic_title": "Dashboard — Multi-Sprint Status & Agent Terminals", "story_title": "Live Agent Terminal in Dashboard", "story_file": null, "bmad_status": "ready-for-dev", "hive_status": "pending" },
+    { "feature_number": 8, "epic_number": 4, "story_number": 1, "epic_title": "System Prompts & Adversarial Tuning", "story_title": "Calibrated System Prompts", "story_file": null, "bmad_status": "ready-for-dev", "hive_status": "pending" }
   ]
 }
