@@ -371,3 +371,134 @@ pub async fn get_ws(
 
     ws.on_upgrade(move |socket| ws_handler(socket, state))
 }
+
+// ── Story 4.1: GET /api/pane-output ──────────────────────────────────────────
+
+#[derive(Deserialize)]
+pub struct PaneOutputParam {
+    session: Option<String>,
+    pane_id: Option<usize>,
+    lines: Option<usize>,
+}
+
+pub async fn get_pane_output(
+    State(state): State<AppState>,
+    Query(params): Query<PaneOutputParam>,
+) -> Response {
+    if let Err(e) = require_session(params.session.as_deref(), &state.daemon.session_name) {
+        return e;
+    }
+
+    let pane_id = match params.pane_id {
+        Some(id) => id,
+        None => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"error": "pane_id parameter required"})),
+            )
+                .into_response();
+        }
+    };
+
+    let max_lines = params.lines.unwrap_or(100);
+
+    // Get pane snapshot from session
+    let sess = state.daemon.session.lock().await;
+    let snap = sess.snapshot();
+    drop(sess);
+
+    // Find the pane in the snapshot
+    for window in &snap.windows {
+        if let Some(pane_snap) = window.pane_cells.iter().find(|p| p.id == pane_id) {
+            // Convert cell data to text lines
+            let lines: Vec<String> = pane_snap
+                .cells
+                .iter()
+                .take(max_lines)
+                .map(|row| {
+                    row.iter().map(|c| c.ch).collect::<String>().trim_end().to_string()
+                })
+                .collect();
+
+            return Json(serde_json::json!({
+                "pane_id": pane_id,
+                "lines": lines,
+                "rows": pane_snap.rows,
+                "cols": pane_snap.cols,
+            }))
+            .into_response();
+        }
+    }
+
+    (
+        StatusCode::NOT_FOUND,
+        Json(serde_json::json!({"error": format!("Pane {} not found", pane_id)})),
+    )
+        .into_response()
+}
+
+// ── Story 6.1: GET /api/audit ────────────────────────────────────────────────
+
+#[derive(Deserialize)]
+pub struct AuditParam {
+    session: Option<String>,
+    agent: Option<String>,
+    event_type: Option<String>,
+    limit: Option<usize>,
+}
+
+pub async fn get_audit(
+    State(state): State<AppState>,
+    Query(params): Query<AuditParam>,
+) -> Response {
+    if let Err(e) = require_session(params.session.as_deref(), &state.daemon.session_name) {
+        return e;
+    }
+
+    // Read audit log from disk
+    let audit_dir = dirs::data_local_dir()
+        .unwrap_or_default()
+        .join("bmux")
+        .join("audit");
+
+    let mut entries: Vec<serde_json::Value> = Vec::new();
+
+    if audit_dir.exists() {
+        // Read all .jsonl files, newest first
+        let mut files: Vec<_> = std::fs::read_dir(&audit_dir)
+            .unwrap_or_else(|_| std::fs::read_dir(".").unwrap())
+            .filter_map(|e| e.ok())
+            .filter(|e| e.path().extension().map_or(false, |ext| ext == "jsonl"))
+            .collect();
+        files.sort_by(|a, b| b.file_name().cmp(&a.file_name()));
+
+        for file in files {
+            if let Ok(content) = std::fs::read_to_string(file.path()) {
+                for line in content.lines().rev() {
+                    if let Ok(entry) = serde_json::from_str::<serde_json::Value>(line) {
+                        // Apply filters
+                        if let Some(ref agent_filter) = params.agent {
+                            if entry.get("agent_id").and_then(|v| v.as_str()) != Some(agent_filter) {
+                                continue;
+                            }
+                        }
+                        if let Some(ref type_filter) = params.event_type {
+                            if entry.get("event_type").and_then(|v| v.as_str()) != Some(type_filter) {
+                                continue;
+                            }
+                        }
+                        entries.push(entry);
+                        if entries.len() >= params.limit.unwrap_or(200) {
+                            break;
+                        }
+                    }
+                }
+            }
+            if entries.len() >= params.limit.unwrap_or(200) {
+                break;
+            }
+        }
+    }
+
+    Json(entries).into_response()
+}

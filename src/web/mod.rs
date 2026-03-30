@@ -19,7 +19,8 @@ use tower_http::{
 use crate::tui::server::DaemonState;
 use events::BmuxEvent;
 use routes::{
-    AppState, get_agents, get_context, get_metrics, get_sessions, get_tasks, get_ws, post_task,
+    AppState, get_agents, get_audit, get_context, get_metrics, get_pane_output, get_sessions,
+    get_tasks, get_ws, post_task,
 };
 
 /// Start the Axum HTTP + WebSocket server.
@@ -69,6 +70,8 @@ pub async fn start_web_server(
         .route("/api/context", get(get_context))
         .route("/api/tasks", get(get_tasks).post(post_task))
         .route("/api/metrics", get(get_metrics))
+        .route("/api/pane-output", get(get_pane_output))
+        .route("/api/audit", get(get_audit))
         // WebSocket
         .route("/ws", get(get_ws))
         // Static files (Next.js build) — served from /
