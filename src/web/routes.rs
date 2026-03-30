@@ -34,22 +34,23 @@ pub struct SessionParam {
 #[derive(Serialize)]
 pub struct SessionInfo {
     pub name: String,
-    pub pid: u32,
-    pub window_count: usize,
-    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub agents: usize,
+    pub created_at: String,
 }
 
 #[derive(Serialize)]
 pub struct AgentInfo {
+    pub id: String,
     pub name: String,
     pub agent_type: String,
     pub model: String,
     pub status: String,
-    pub tokens: u64,
-    pub cost: f64,
+    pub tokens_used: u64,
+    pub cost_usd: f64,
     pub uptime_seconds: u64,
     pub pane_id: Option<usize>,
     pub last_task: Option<String>,
+    pub spawned_at: String,
 }
 
 #[derive(Serialize)]
@@ -63,11 +64,13 @@ pub struct ContextEntryJson {
 #[derive(Serialize)]
 pub struct TaskJson {
     pub id: String,
-    pub destination: String,
+    pub from_agent: String,
+    pub to_agent: String,
     pub content: String,
     pub status: String,
     pub submitted_at: String,
-    pub cost: Option<f64>,
+    pub completed_at: Option<String>,
+    pub cost_usd: Option<f64>,
 }
 
 #[derive(Serialize)]
@@ -119,9 +122,8 @@ pub async fn get_sessions(State(state): State<AppState>) -> impl IntoResponse {
         .into_iter()
         .map(|m| SessionInfo {
             name: m.name,
-            pid: m.pid,
-            window_count: m.window_count,
-            created_at: m.created_at,
+            agents: m.window_count.saturating_sub(1), // first window is the shell, rest are agents
+            created_at: m.created_at.to_rfc3339(),
         })
         .collect();
 
@@ -133,9 +135,8 @@ pub async fn get_sessions(State(state): State<AppState>) -> impl IntoResponse {
         let window_count = state.daemon.session.lock().await.window_count();
         sessions.push(SessionInfo {
             name: own.clone(),
-            pid: std::process::id(),
-            window_count,
-            created_at: Utc::now(),
+            agents: window_count.saturating_sub(1),
+            created_at: Utc::now().to_rfc3339(),
         });
     }
 
@@ -157,15 +158,17 @@ pub async fn get_agents(
         .list()
         .into_iter()
         .map(|a| AgentInfo {
+            id: a.name.clone(),
             name: a.name.clone(),
             agent_type: a.agent_type.clone(),
             model: a.model.clone(),
             status: a.status.label().to_string(),
-            tokens: a.tokens_used,
-            cost: a.cost_usd,
+            tokens_used: a.tokens_used,
+            cost_usd: a.cost_usd,
             uptime_seconds: a.uptime_seconds(),
             pane_id: a.pane_id,
             last_task: a.last_task.clone(),
+            spawned_at: chrono::Utc::now().to_rfc3339(),
         })
         .collect();
 
@@ -218,11 +221,13 @@ pub async fn get_tasks(
         .into_iter()
         .map(|t| TaskJson {
             id: t.id,
-            destination: t.destination,
+            from_agent: "user".to_string(), // tasks initiated by user or auto-router
+            to_agent: t.destination,
             content: t.content,
             status: t.status.to_string(),
             submitted_at: t.submitted_at.to_rfc3339(),
-            cost: t.result.as_ref().map(|r| r.cost_usd),
+            completed_at: t.result.as_ref().map(|_| chrono::Utc::now().to_rfc3339()),
+            cost_usd: t.result.as_ref().map(|r| r.cost_usd),
         })
         .collect();
 

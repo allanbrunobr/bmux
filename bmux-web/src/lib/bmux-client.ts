@@ -71,7 +71,7 @@ export class BmuxClient {
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ to_agent: toAgent, content }),
+          body: JSON.stringify({ session, agent: toAgent, content }),
           signal: AbortSignal.timeout(10000),
         }
       );
