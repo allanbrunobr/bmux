@@ -77,34 +77,34 @@
 ## Feature 15: Pane Output Streaming Endpoint
 - Description: [Epic 4: Terminal Embed, Story 4.1] As a developer, I want a backend endpoint GET /api/pane-output that returns last N lines of raw ANSI output and streams live via WebSocket pane_output events. Source: _bmad-output/planning-artifacts/web-dashboard-epics.md
 - Dependencies: Feature 8
-- Status: pending
+- Status: done
 
 ## Feature 16: xterm.js Terminal Component
 - Description: [Epic 4: Terminal Embed, Story 4.2] As a dashboard user, I want to click View Terminal on an agent card and see live read-only terminal output via xterm.js. Source: _bmad-output/planning-artifacts/web-dashboard-epics.md
 - Dependencies: Feature 15
-- Status: pending
+- Status: done
 
 ## Feature 17: Metrics Charts with Recharts
 - Description: [Epic 5: Metrics & Maps, Story 5.1] As a dashboard user, I want line charts showing tokens per minute per agent and cumulative cost over time, updating in real time. Source: _bmad-output/planning-artifacts/web-dashboard-epics.md
 - Dependencies: Feature 14
-- Status: pending
+- Status: done
 
 ## Feature 18: Geographic Agent Map with deck.gl
 - Description: [Epic 5: Metrics & Maps, Story 5.2] As a dashboard user, I want a world map showing agent pins at geographic locations with animated arcs when tasks are sent between agents. Source: _bmad-output/planning-artifacts/web-dashboard-epics.md
 - Dependencies: Feature 17
-- Status: pending
+- Status: done
 
 ## Feature 19: Cost Breakdown Dashboard
 - Description: [Epic 5: Metrics & Maps, Story 5.3] As a dashboard user, I want cost per agent table, cost per hour bar chart, and projected daily/monthly cost. Source: _bmad-output/planning-artifacts/web-dashboard-epics.md
 - Dependencies: Feature 18
-- Status: pending
+- Status: done
 
 ## Feature 20: Audit Log Viewer with Filtering & CSV Export
 - Description: [Epic 6: Healthcare/Compliance, Story 6.1] As a compliance officer, I want a filterable audit log with LGPD indicators and CSV export for regulatory review. Source: _bmad-output/planning-artifacts/web-dashboard-epics.md
 - Dependencies: Feature 14
-- Status: pending
+- Status: done
 
 ## Feature 21: Cost per Consultation (AFYA Use Case)
 - Description: [Epic 6: Healthcare/Compliance, Story 6.2] As a healthcare administrator, I want token costs grouped by consultation session with transcription + SOAP note cost breakdown. Source: _bmad-output/planning-artifacts/web-dashboard-epics.md
 - Dependencies: Feature 20
-- Status: pending
+- Status: done

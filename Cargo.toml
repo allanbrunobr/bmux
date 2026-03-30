@@ -53,6 +53,12 @@ thiserror = "1"
 # Async trait
 async-trait = "0.1"
 
+# Web / HTTP (Epic 4-6: web dashboard backend)
+axum = { version = "0.7", features = ["ws"] }
+tower = "0.4"
+tower-http = { version = "0.5", features = ["cors", "fs"] }
+tokio-stream = "0.1"
+
 # Misc
 bytes = "1"
 chrono = { version = "0.4", features = ["serde"] }
