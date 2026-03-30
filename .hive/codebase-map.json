@@ -1,0 +1,799 @@
+{
+  "project": {
+    "name": "bmux",
+    "language": "rust",
+    "framework": "ratatui",
+    "root": "/Users/bruno/Desktop/BMUX/bmux",
+    "intelligence_mode": "FULL"
+  },
+  "stats": {
+    "totalFiles": 43,
+    "components": 12,
+    "services": 11,
+    "utilities": 8,
+    "configs": 5,
+    "tests": 10
+  },
+  "clusters": [
+    {
+      "id": "tui",
+      "label": "TUI & Rendering",
+      "files": [
+        "src/tui/mod.rs",
+        "src/tui/pane.rs",
+        "src/tui/window.rs",
+        "src/tui/session.rs",
+        "src/tui/layout.rs",
+        "src/tui/keybindings.rs",
+        "src/tui/protocol.rs",
+        "src/tui/client.rs",
+        "src/tui/server.rs",
+        "src/tui/scroll.rs",
+        "src/tui/status_bar.rs",
+        "src/tui/zoom.rs",
+        "src/tui/ipc_client.rs"
+      ],
+      "description": "Terminal multiplexer TUI: panes, windows, sessions, BSP layout, client-server protocol, rendering"
+    },
+    {
+      "id": "agents",
+      "label": "Agent System",
+      "files": [
+        "src/agents/adapter.rs",
+        "src/agents/generic_cli.rs",
+        "src/agents/shell.rs",
+        "src/agents/claude_code.rs",
+        "src/agents/opencode.rs",
+        "src/agents/pi.rs",
+        "src/agents/gemini.rs",
+        "src/agents/custom.rs",
+        "src/agents/registry.rs",
+        "src/agents/commands.rs",
+        "src/agents/mod.rs"
+      ],
+      "description": "Agent lifecycle: trait, PTY-based adapter, registry, CLI commands"
+    },
+    {
+      "id": "orchestration",
+      "label": "Orchestration & IPC",
+      "files": [
+        "src/orchestration/message_bus.rs",
+        "src/orchestration/task_router.rs",
+        "src/orchestration/context_store.rs",
+        "src/orchestration/mod.rs"
+      ],
+      "description": "Message bus (Unix socket + HMAC), task routing with scoring, shared context API"
+    },
+    {
+      "id": "storage",
+      "label": "Storage & Persistence",
+      "files": [
+        "src/storage/context_store.rs",
+        "src/storage/session_store.rs",
+        "src/storage/audit_log.rs",
+        "src/storage/mod.rs"
+      ],
+      "description": "Sled KV context store, session persistence, JSONL audit logging"
+    },
+    {
+      "id": "security",
+      "label": "Security & Sandboxing",
+      "files": [
+        "src/security/sandbox.rs",
+        "src/security/hmac.rs",
+        "src/security/secrets.rs",
+        "src/security/mod.rs"
+      ],
+      "description": "Filesystem sandboxing (Landlock/Seatbelt), HMAC auth, secrets management"
+    },
+    {
+      "id": "workflow",
+      "label": "Workflow Engine",
+      "files": [
+        "src/workflow/engine.rs",
+        "src/workflow/yaml_parser.rs",
+        "src/workflow/mod.rs"
+      ],
+      "description": "YAML DAG parser, parallel step execution, template injection"
+    },
+    {
+      "id": "config",
+      "label": "Configuration & Distribution",
+      "files": [
+        "src/config/settings.rs",
+        "src/config/mod.rs",
+        "build.rs",
+        "Formula/bmux.rb",
+        "Cargo.toml"
+      ],
+      "description": "TOML config, hot reload, CI/CD, Homebrew, version embedding"
+    }
+  ],
+  "files": [
+    {
+      "path": "src/agents/adapter.rs",
+      "type": "service",
+      "exports": [
+        "AgentAdapter",
+        "AgentStatus",
+        "AgentConfig",
+        "Task",
+        "AgentOutput"
+      ],
+      "imports": [
+        "async_trait",
+        "serde"
+      ],
+      "complexity": 3,
+      "lines": 162,
+      "hasTests": true,
+      "hasDocs": true,
+      "cluster_id": "agents",
+      "semantic": {
+        "intent": "Core trait defining agent interface (spawn, send_task, recv_output, status, kill) \u2014 matched by 12 files across agents, commands, task_router, and tests",
+        "gaps": [
+          "binary_in_path utility is orphaned \u2014 not called from spawn path"
+        ],
+        "related": [
+          "tests/agent_tests.rs",
+          "src/agents/custom.rs",
+          "src/agents/generic_cli.rs"
+        ]
+      }
+    },
+    {
+      "path": "src/agents/generic_cli.rs",
+      "type": "service",
+      "exports": [
+        "GenericCliAdapter",
+        "write_to_pty"
+      ],
+      "imports": [
+        "portable_pty",
+        "agents::adapter"
+      ],
+      "complexity": 6,
+      "lines": 340,
+      "hasTests": true,
+      "hasDocs": true,
+      "cluster_id": "agents",
+      "semantic": {
+        "intent": "PTY-based agent adapter \u2014 spawns login shell, launches agent inside, manages I/O",
+        "gaps": [],
+        "related": [
+          "src/tui/pane.rs"
+        ]
+      }
+    },
+    {
+      "path": "src/agents/registry.rs",
+      "type": "service",
+      "exports": [
+        "AgentRegistry",
+        "AgentInfo",
+        "AggregateStats"
+      ],
+      "imports": [
+        "agents::adapter",
+        "tui::status_bar"
+      ],
+      "complexity": 5,
+      "lines": 463,
+      "hasTests": true,
+      "hasDocs": true,
+      "cluster_id": "agents",
+      "semantic": {
+        "intent": "Manages spawned agents \u2014 register, list, get, remove, track cost/tokens",
+        "gaps": [],
+        "related": [
+          "src/tui/server.rs"
+        ]
+      }
+    },
+    {
+      "path": "src/agents/commands.rs",
+      "type": "service",
+      "exports": [
+        "handle_spawn",
+        "handle_list",
+        "handle_status",
+        "handle_kill",
+        "agent_type_icon"
+      ],
+      "imports": [
+        "agents::adapter",
+        "agents::registry",
+        "config::settings"
+      ],
+      "complexity": 7,
+      "lines": 371,
+      "hasTests": true,
+      "hasDocs": true,
+      "cluster_id": "agents",
+      "semantic": {
+        "intent": "CLI command handlers for bmux agent spawn/list/status/kill",
+        "gaps": [
+          "commands create local adapters but daemon uses pane-based spawn"
+        ],
+        "related": [
+          "src/tui/server.rs"
+        ]
+      }
+    },
+    {
+      "path": "src/config/settings.rs",
+      "type": "config",
+      "exports": [
+        "BmuxConfig",
+        "AgentsConfig",
+        "AgentSettingsConfig",
+        "Settings"
+      ],
+      "imports": [
+        "serde",
+        "toml",
+        "dirs"
+      ],
+      "complexity": 4,
+      "lines": 315,
+      "hasTests": true,
+      "hasDocs": true,
+      "cluster_id": "config",
+      "semantic": {
+        "intent": "TOML config loading with sensible defaults, hot_reload, agent binary settings \u2014 35 usages across 7 files. Settings type alias for BmuxConfig",
+        "gaps": [
+          "agent_types() allocates new HashMap on every call \u2014 should be cached"
+        ],
+        "related": [
+          "src/agents/commands.rs",
+          "src/tui/server.rs",
+          "src/workflow/yaml_parser.rs"
+        ]
+      }
+    },
+    {
+      "path": "src/tui/server.rs",
+      "type": "service",
+      "exports": [
+        "DaemonServer"
+      ],
+      "imports": [
+        "agents::registry",
+        "config::settings",
+        "storage::context_store",
+        "orchestration::task_router",
+        "orchestration::message_bus"
+      ],
+      "complexity": 9,
+      "lines": 670,
+      "hasTests": false,
+      "hasDocs": true,
+      "cluster_id": "tui",
+      "semantic": {
+        "intent": "Session daemon owning all state (Session, AgentRegistry, ContextStore, TaskRouter). Handles TUI clients and CLI queries via Unix socket protocol \u2014 52.8% semantic match",
+        "gaps": [
+          "no tests for daemon handlers",
+          "TaskRouter bus not started \u2014 dispatch is in-process"
+        ],
+        "related": [
+          "src/tui/client.rs",
+          "src/tui/protocol.rs",
+          "src/agents/registry.rs"
+        ]
+      }
+    },
+    {
+      "path": "src/tui/client.rs",
+      "type": "component",
+      "exports": [
+        "run_client"
+      ],
+      "imports": [
+        "tui::protocol",
+        "tui::keybindings"
+      ],
+      "complexity": 6,
+      "lines": 282,
+      "hasTests": false,
+      "hasDocs": true,
+      "cluster_id": "tui",
+      "semantic": {
+        "intent": "TUI client \u2014 connects to daemon socket, renders SessionSnapshot, forwards keyboard/mouse input \u2014 65.4% semantic match for daemon+render queries",
+        "gaps": [],
+        "related": [
+          "src/tui/protocol.rs",
+          "src/tui/server.rs"
+        ]
+      }
+    },
+    {
+      "path": "src/tui/pane.rs",
+      "type": "component",
+      "exports": [
+        "Pane",
+        "PaneView"
+      ],
+      "imports": [
+        "portable_pty",
+        "vt100",
+        "ratatui"
+      ],
+      "complexity": 5,
+      "lines": 282,
+      "hasTests": false,
+      "hasDocs": true,
+      "cluster_id": "tui",
+      "semantic": {
+        "intent": "Single terminal pane \u2014 PTY management, vt100 parsing, ratatui rendering",
+        "gaps": [],
+        "related": [
+          "src/tui/window.rs"
+        ]
+      }
+    },
+    {
+      "path": "src/tui/window.rs",
+      "type": "component",
+      "exports": [
+        "Window"
+      ],
+      "imports": [
+        "tui::pane",
+        "tui::layout"
+      ],
+      "complexity": 5,
+      "lines": 270,
+      "hasTests": false,
+      "hasDocs": true,
+      "cluster_id": "tui",
+      "semantic": {
+        "intent": "Window container \u2014 pane splitting, focus management, mouse border detection",
+        "gaps": [],
+        "related": [
+          "src/tui/session.rs"
+        ]
+      }
+    },
+    {
+      "path": "src/tui/layout.rs",
+      "type": "utility",
+      "exports": [
+        "Layout",
+        "ResizeDir"
+      ],
+      "imports": [
+        "ratatui::layout::Rect"
+      ],
+      "complexity": 7,
+      "lines": 303,
+      "hasTests": true,
+      "hasDocs": true,
+      "cluster_id": "tui",
+      "semantic": {
+        "intent": "BSP layout tree \u2014 split, compute_rects, directional navigation, resize",
+        "gaps": [],
+        "related": [
+          "src/tui/window.rs"
+        ]
+      }
+    },
+    {
+      "path": "src/tui/protocol.rs",
+      "type": "utility",
+      "exports": [
+        "ClientMessage",
+        "ServerMessage",
+        "SessionSnapshot"
+      ],
+      "imports": [
+        "serde",
+        "tui::keybindings"
+      ],
+      "complexity": 2,
+      "lines": 115,
+      "hasTests": false,
+      "hasDocs": true,
+      "cluster_id": "tui",
+      "semantic": {
+        "intent": "Wire protocol between daemon and clients \u2014 JSON over Unix socket",
+        "gaps": [],
+        "related": [
+          "src/tui/client.rs",
+          "src/tui/server.rs"
+        ]
+      }
+    },
+    {
+      "path": "src/tui/ipc_client.rs",
+      "type": "utility",
+      "exports": [
+        "resolve_session",
+        "query"
+      ],
+      "imports": [
+        "tui::protocol",
+        "tui::session"
+      ],
+      "complexity": 3,
+      "lines": 93,
+      "hasTests": false,
+      "hasDocs": true,
+      "cluster_id": "tui",
+      "semantic": {
+        "intent": "Lightweight IPC client for CLI subcommands \u2014 session resolution + one-shot queries",
+        "gaps": [],
+        "related": [
+          "src/main.rs"
+        ]
+      }
+    },
+    {
+      "path": "src/orchestration/message_bus.rs",
+      "type": "service",
+      "exports": [
+        "MessageBus",
+        "IpcMessage",
+        "MessageBuilder"
+      ],
+      "imports": [
+        "ring::hmac",
+        "tokio::net::UnixListener",
+        "security::hmac"
+      ],
+      "complexity": 8,
+      "lines": 669,
+      "hasTests": true,
+      "hasDocs": true,
+      "cluster_id": "orchestration",
+      "semantic": {
+        "intent": "Unix socket IPC with HMAC-SHA256 per-message authentication \u2014 78.9% semantic match for IPC+HMAC queries. Delegates key gen to security::hmac module (ADR-001)",
+        "gaps": [
+          "bus socket never started in daemon \u2014 dispatch_task_now is in-process only",
+          "no reconnection logic if socket dies"
+        ],
+        "related": [
+          "src/security/hmac.rs",
+          "src/orchestration/task_router.rs",
+          "tests/security_hmac_test.rs"
+        ]
+      }
+    },
+    {
+      "path": "src/orchestration/task_router.rs",
+      "type": "service",
+      "exports": [
+        "TaskRouter",
+        "Task",
+        "AgentInfo",
+        "SendResult",
+        "AutoRouteResult"
+      ],
+      "imports": [
+        "orchestration::message_bus"
+      ],
+      "complexity": 8,
+      "lines": 1075,
+      "hasTests": true,
+      "hasDocs": true,
+      "cluster_id": "orchestration",
+      "semantic": {
+        "intent": "Task routing with scoring algorithm (capability*0.5 + cost_inverse*0.3 + idle_time*0.2), queue management, auto-routing \u2014 62.1% semantic match",
+        "gaps": [
+          "capability_score is a stub returning keyword match length \u2014 not a real NLP scorer"
+        ],
+        "related": [
+          "src/agents/adapter.rs",
+          "src/tui/server.rs"
+        ]
+      }
+    },
+    {
+      "path": "src/storage/context_store.rs",
+      "type": "service",
+      "exports": [
+        "ContextStore",
+        "ContextEntry"
+      ],
+      "imports": [
+        "sled",
+        "serde_json"
+      ],
+      "complexity": 5,
+      "lines": 396,
+      "hasTests": true,
+      "hasDocs": true,
+      "cluster_id": "storage",
+      "semantic": {
+        "intent": "Sled-backed KV store with TTL, session namespacing, cleanup \u2014 51.7% semantic match. Used by orchestration layer, workflow engine, and session_store",
+        "gaps": [],
+        "related": [
+          "src/storage/session_store.rs",
+          "src/orchestration/context_store.rs",
+          "src/workflow/engine.rs"
+        ]
+      }
+    },
+    {
+      "path": "src/storage/audit_log.rs",
+      "type": "service",
+      "exports": [
+        "AuditLogger",
+        "EventType"
+      ],
+      "imports": [
+        "serde_json",
+        "chrono"
+      ],
+      "complexity": 4,
+      "lines": 487,
+      "hasTests": true,
+      "hasDocs": true,
+      "cluster_id": "storage",
+      "semantic": {
+        "intent": "JSONL audit logging \u2014 100% completeness for all agent actions",
+        "gaps": [],
+        "related": []
+      }
+    },
+    {
+      "path": "src/security/sandbox.rs",
+      "type": "service",
+      "exports": [
+        "apply_sandbox",
+        "SandboxMode"
+      ],
+      "imports": [
+        "landlock",
+        "thiserror"
+      ],
+      "complexity": 6,
+      "lines": 377,
+      "hasTests": true,
+      "hasDocs": true,
+      "cluster_id": "security",
+      "semantic": {
+        "intent": "Filesystem sandboxing \u2014 Landlock (Linux 5.13+), Seatbelt (macOS), namespace fallback \u2014 67% semantic match. Platform-adaptive with graceful degradation",
+        "gaps": [
+          "sandbox not wired into agent spawn path \u2014 agents run unsandboxed",
+          "Seatbelt test contaminates process (marked #[ignore])"
+        ],
+        "related": [
+          "tests/security_sandbox_test.rs"
+        ]
+      }
+    },
+    {
+      "path": "src/workflow/engine.rs",
+      "type": "service",
+      "exports": [
+        "WorkflowEngine"
+      ],
+      "imports": [
+        "orchestration::task_router",
+        "storage::context_store"
+      ],
+      "complexity": 7,
+      "lines": 730,
+      "hasTests": true,
+      "hasDocs": true,
+      "cluster_id": "workflow",
+      "semantic": {
+        "intent": "DAG workflow execution \u2014 topological sort, parallel step dispatch via tokio::spawn, template parameter injection ({{ input.X }}, {{ context.KEY }}) \u2014 54.4% semantic match",
+        "gaps": [
+          "execution tests require running MessageBus (marked #[ignore])",
+          "step failure does not retry \u2014 halts entire workflow"
+        ],
+        "related": [
+          "src/workflow/yaml_parser.rs",
+          "src/storage/context_store.rs"
+        ]
+      }
+    },
+    {
+      "path": "src/workflow/yaml_parser.rs",
+      "type": "utility",
+      "exports": [
+        "WorkflowParser",
+        "WorkflowDag"
+      ],
+      "imports": [
+        "serde_yaml",
+        "config::settings"
+      ],
+      "complexity": 6,
+      "lines": 575,
+      "hasTests": true,
+      "hasDocs": true,
+      "cluster_id": "workflow",
+      "semantic": {
+        "intent": "YAML workflow parser \u2014 validates agent types, detects cycles, dry-run summaries",
+        "gaps": [],
+        "related": [
+          "src/workflow/engine.rs"
+        ]
+      }
+    },
+    {
+      "path": "src/main.rs",
+      "type": "config",
+      "exports": [
+        "main"
+      ],
+      "imports": [
+        "clap",
+        "bmux::tui",
+        "bmux::agents",
+        "bmux::config",
+        "bmux::orchestration",
+        "bmux::workflow",
+        "bmux::storage"
+      ],
+      "complexity": 5,
+      "lines": 580,
+      "hasTests": false,
+      "hasDocs": true,
+      "cluster_id": "config",
+      "semantic": {
+        "intent": "CLI entrypoint \u2014 all subcommands routed through IPC to daemon",
+        "gaps": [],
+        "related": [
+          "src/tui/ipc_client.rs"
+        ]
+      }
+    }
+  ],
+  "dependencies": [
+    {
+      "from": "src/agents/generic_cli.rs",
+      "to": "src/agents/adapter.rs",
+      "type": "import"
+    },
+    {
+      "from": "src/agents/commands.rs",
+      "to": "src/agents/adapter.rs",
+      "type": "import"
+    },
+    {
+      "from": "src/agents/commands.rs",
+      "to": "src/config/settings.rs",
+      "type": "import"
+    },
+    {
+      "from": "src/agents/commands.rs",
+      "to": "src/agents/registry.rs",
+      "type": "import"
+    },
+    {
+      "from": "src/agents/registry.rs",
+      "to": "src/agents/adapter.rs",
+      "type": "import"
+    },
+    {
+      "from": "src/agents/registry.rs",
+      "to": "src/tui/status_bar.rs",
+      "type": "import"
+    },
+    {
+      "from": "src/tui/server.rs",
+      "to": "src/agents/registry.rs",
+      "type": "import"
+    },
+    {
+      "from": "src/tui/server.rs",
+      "to": "src/config/settings.rs",
+      "type": "import"
+    },
+    {
+      "from": "src/tui/server.rs",
+      "to": "src/storage/context_store.rs",
+      "type": "import"
+    },
+    {
+      "from": "src/tui/server.rs",
+      "to": "src/orchestration/task_router.rs",
+      "type": "import"
+    },
+    {
+      "from": "src/tui/server.rs",
+      "to": "src/orchestration/message_bus.rs",
+      "type": "import"
+    },
+    {
+      "from": "src/tui/client.rs",
+      "to": "src/tui/protocol.rs",
+      "type": "import"
+    },
+    {
+      "from": "src/tui/client.rs",
+      "to": "src/tui/keybindings.rs",
+      "type": "import"
+    },
+    {
+      "from": "src/orchestration/task_router.rs",
+      "to": "src/orchestration/message_bus.rs",
+      "type": "import"
+    },
+    {
+      "from": "src/orchestration/task_router.rs",
+      "to": "src/agents/adapter.rs",
+      "type": "import"
+    },
+    {
+      "from": "src/orchestration/context_store.rs",
+      "to": "src/storage/context_store.rs",
+      "type": "import"
+    },
+    {
+      "from": "src/storage/session_store.rs",
+      "to": "src/storage/context_store.rs",
+      "type": "import"
+    },
+    {
+      "from": "src/workflow/engine.rs",
+      "to": "src/orchestration/task_router.rs",
+      "type": "import"
+    },
+    {
+      "from": "src/workflow/engine.rs",
+      "to": "src/storage/context_store.rs",
+      "type": "import"
+    },
+    {
+      "from": "src/workflow/yaml_parser.rs",
+      "to": "src/config/settings.rs",
+      "type": "import"
+    },
+    {
+      "from": "src/main.rs",
+      "to": "src/tui/ipc_client.rs",
+      "type": "import"
+    },
+    {
+      "from": "src/main.rs",
+      "to": "src/tui/protocol.rs",
+      "type": "import"
+    },
+    {
+      "from": "src/orchestration/message_bus.rs",
+      "to": "src/security/hmac.rs",
+      "type": "import"
+    },
+    {
+      "from": "src/orchestration/message_bus.rs",
+      "to": "src/agents/adapter.rs",
+      "type": "import"
+    }
+  ],
+  "hubFiles": [
+    {
+      "path": "src/agents/adapter.rs",
+      "imported_by_count": 12,
+      "impact_score": 24,
+      "cluster_id": "agents"
+    },
+    {
+      "path": "src/config/settings.rs",
+      "imported_by_count": 7,
+      "impact_score": 35,
+      "cluster_id": "config"
+    },
+    {
+      "path": "src/storage/context_store.rs",
+      "imported_by_count": 5,
+      "impact_score": 37,
+      "cluster_id": "storage"
+    },
+    {
+      "path": "src/orchestration/message_bus.rs",
+      "imported_by_count": 3,
+      "impact_score": 10,
+      "cluster_id": "orchestration"
+    },
+    {
+      "path": "src/tui/server.rs",
+      "imported_by_count": 1,
+      "impact_score": 8,
+      "cluster_id": "tui"
+    }
+  ]
+}

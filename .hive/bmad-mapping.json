@@ -1,0 +1,28 @@
+{
+  "generated": "2026-03-29",
+  "source_epics_file": "_bmad-output/planning-artifacts/web-dashboard-epics.md",
+  "project_context_file": null,
+  "mappings": [
+    { "feature_number": 1, "epic_number": 1, "story_number": 1, "epic_title": "Backend — Axum HTTP API + Web Server", "story_title": "Axum Server Scaffold & Sessions Endpoint", "story_file": null, "bmad_status": "ready-for-dev", "hive_status": "pending" },
+    { "feature_number": 2, "epic_number": 1, "story_number": 2, "epic_title": "Backend — Axum HTTP API + Web Server", "story_title": "Agents Endpoint", "story_file": null, "bmad_status": "ready-for-dev", "hive_status": "pending" },
+    { "feature_number": 3, "epic_number": 1, "story_number": 3, "epic_title": "Backend — Axum HTTP API + Web Server", "story_title": "Context & Tasks Endpoints", "story_file": null, "bmad_status": "ready-for-dev", "hive_status": "pending" },
+    { "feature_number": 4, "epic_number": 1, "story_number": 4, "epic_title": "Backend — Axum HTTP API + Web Server", "story_title": "Static File Serving & bmux web CLI Command", "story_file": null, "bmad_status": "ready-for-dev", "hive_status": "pending" },
+    { "feature_number": 5, "epic_number": 1, "story_number": 5, "epic_title": "Backend — Axum HTTP API + Web Server", "story_title": "POST Endpoint — Send Task from Browser", "story_file": null, "bmad_status": "ready-for-dev", "hive_status": "pending" },
+    { "feature_number": 6, "epic_number": 2, "story_number": 1, "epic_title": "Backend — WebSocket Real-Time Events", "story_title": "WebSocket Endpoint & Event Broadcaster", "story_file": null, "bmad_status": "ready-for-dev", "hive_status": "pending" },
+    { "feature_number": 7, "epic_number": 2, "story_number": 2, "epic_title": "Backend — WebSocket Real-Time Events", "story_title": "BmuxEvent Enum & Emission Points", "story_file": null, "bmad_status": "ready-for-dev", "hive_status": "pending" },
+    { "feature_number": 8, "epic_number": 2, "story_number": 3, "epic_title": "Backend — WebSocket Real-Time Events", "story_title": "Client Reconnection & Multi-Client Support", "story_file": null, "bmad_status": "ready-for-dev", "hive_status": "pending" },
+    { "feature_number": 9, "epic_number": 3, "story_number": 1, "epic_title": "Frontend — Core Dashboard", "story_title": "Next.js Project Scaffold & Layout", "story_file": null, "bmad_status": "ready-for-dev", "hive_status": "pending" },
+    { "feature_number": 10, "epic_number": 3, "story_number": 2, "epic_title": "Frontend — Core Dashboard", "story_title": "Session Selector & WebSocket Connection", "story_file": null, "bmad_status": "ready-for-dev", "hive_status": "pending" },
+    { "feature_number": 11, "epic_number": 3, "story_number": 3, "epic_title": "Frontend — Core Dashboard", "story_title": "Agent Cards Grid", "story_file": null, "bmad_status": "ready-for-dev", "hive_status": "pending" },
+    { "feature_number": 12, "epic_number": 3, "story_number": 4, "epic_title": "Frontend — Core Dashboard", "story_title": "Shared Context Live Feed", "story_file": null, "bmad_status": "ready-for-dev", "hive_status": "pending" },
+    { "feature_number": 13, "epic_number": 3, "story_number": 5, "epic_title": "Frontend — Core Dashboard", "story_title": "Task Queue Table", "story_file": null, "bmad_status": "ready-for-dev", "hive_status": "pending" },
+    { "feature_number": 14, "epic_number": 3, "story_number": 6, "epic_title": "Frontend — Core Dashboard", "story_title": "Send Task Modal", "story_file": null, "bmad_status": "ready-for-dev", "hive_status": "pending" },
+    { "feature_number": 15, "epic_number": 4, "story_number": 1, "epic_title": "Frontend — Terminal Embed", "story_title": "Pane Output Streaming Endpoint", "story_file": null, "bmad_status": "ready-for-dev", "hive_status": "pending" },
+    { "feature_number": 16, "epic_number": 4, "story_number": 2, "epic_title": "Frontend — Terminal Embed", "story_title": "xterm.js Terminal Component", "story_file": null, "bmad_status": "ready-for-dev", "hive_status": "pending" },
+    { "feature_number": 17, "epic_number": 5, "story_number": 1, "epic_title": "Frontend — Metrics, Charts & Geographic Map", "story_title": "Metrics Charts with Recharts", "story_file": null, "bmad_status": "ready-for-dev", "hive_status": "pending" },
+    { "feature_number": 18, "epic_number": 5, "story_number": 2, "epic_title": "Frontend — Metrics, Charts & Geographic Map", "story_title": "Geographic Agent Map with deck.gl", "story_file": null, "bmad_status": "ready-for-dev", "hive_status": "pending" },
+    { "feature_number": 19, "epic_number": 5, "story_number": 3, "epic_title": "Frontend — Metrics, Charts & Geographic Map", "story_title": "Cost Breakdown Dashboard", "story_file": null, "bmad_status": "ready-for-dev", "hive_status": "pending" },
+    { "feature_number": 20, "epic_number": 6, "story_number": 1, "epic_title": "Healthcare / Compliance Features", "story_title": "Audit Log Viewer with Filtering & CSV Export", "story_file": null, "bmad_status": "ready-for-dev", "hive_status": "pending" },
+    { "feature_number": 21, "epic_number": 6, "story_number": 2, "epic_title": "Healthcare / Compliance Features", "story_title": "Cost per Consultation (AFYA Use Case)", "story_file": null, "bmad_status": "ready-for-dev", "hive_status": "pending" }
+  ]
+}
