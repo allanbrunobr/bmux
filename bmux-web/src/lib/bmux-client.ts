@@ -34,28 +34,28 @@ export class BmuxClient {
 
   async getAgents(session: string): Promise<Agent[]> {
     return fetchWithFallback<Agent[]>(
-      `${API_BASE}/api/sessions/${encodeURIComponent(session)}/agents`,
+      `${API_BASE}/api/agents?session=${encodeURIComponent(session)}`,
       getMockAgents
     );
   }
 
   async getContext(session: string): Promise<ContextEntry[]> {
     return fetchWithFallback<ContextEntry[]>(
-      `${API_BASE}/api/sessions/${encodeURIComponent(session)}/context`,
+      `${API_BASE}/api/context?session=${encodeURIComponent(session)}`,
       getMockContextEntries
     );
   }
 
   async getTasks(session: string): Promise<Task[]> {
     return fetchWithFallback<Task[]>(
-      `${API_BASE}/api/sessions/${encodeURIComponent(session)}/tasks`,
+      `${API_BASE}/api/tasks?session=${encodeURIComponent(session)}`,
       getMockTasks
     );
   }
 
   async getMetrics(session: string): Promise<Metrics> {
     return fetchWithFallback<Metrics>(
-      `${API_BASE}/api/sessions/${encodeURIComponent(session)}/metrics`,
+      `${API_BASE}/api/metrics?session=${encodeURIComponent(session)}`,
       getMockMetrics
     );
   }
@@ -67,7 +67,7 @@ export class BmuxClient {
   ): Promise<{ id: string }> {
     try {
       const res = await fetch(
-        `${API_BASE}/api/sessions/${encodeURIComponent(session)}/tasks`,
+        `${API_BASE}/api/tasks?session=${encodeURIComponent(session)}`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },

@@ -73,9 +73,11 @@ pub struct TaskJson {
 #[derive(Serialize)]
 pub struct MetricsJson {
     pub total_tokens: u64,
-    pub total_cost: f64,
+    pub total_cost_usd: f64,
     pub active_agents: usize,
-    pub completed_tasks: usize,
+    pub tasks_completed: usize,
+    pub tasks_failed: usize,
+    pub uptime_seconds: u64,
 }
 
 #[derive(Deserialize)]
@@ -249,11 +251,20 @@ pub async fn get_metrics(
         })
         .count();
 
+    let failed_tasks = tasks
+        .iter()
+        .filter(|t| {
+            t.status == crate::orchestration::task_router::TaskStatus::Failed
+        })
+        .count();
+
     Json(MetricsJson {
         total_tokens: stats.total_tokens,
-        total_cost: stats.total_cost,
+        total_cost_usd: stats.total_cost,
         active_agents: stats.active_agents,
-        completed_tasks,
+        tasks_completed: completed_tasks,
+        tasks_failed: failed_tasks,
+        uptime_seconds: stats.session_seconds,
     })
     .into_response()
 }
@@ -477,6 +488,10 @@ pub async fn get_audit(
                 for line in content.lines().rev() {
                     if let Ok(entry) = serde_json::from_str::<serde_json::Value>(line) {
                         // Apply filters
+                        // Filter by session_id — prevent cross-session leaks
+                        if entry.get("session_id").and_then(|v| v.as_str()) != Some(&state.daemon.session_name) {
+                            continue;
+                        }
                         if let Some(ref agent_filter) = params.agent {
                             if entry.get("agent_id").and_then(|v| v.as_str()) != Some(agent_filter) {
                                 continue;
