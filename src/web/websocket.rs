@@ -1,11 +1,9 @@
-use std::sync::Arc;
 
 use axum::extract::ws::{Message, WebSocket};
 use chrono::Utc;
 use serde::Serialize;
 use tokio::sync::broadcast;
 
-use crate::web::events::BmuxEvent;
 use crate::web::routes::AppState;
 
 // ── Full state snapshot (sent on first connect for Story 2.3) ────────────────

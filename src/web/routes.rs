@@ -468,7 +468,7 @@ pub async fn get_audit(
         let mut files: Vec<_> = std::fs::read_dir(&audit_dir)
             .unwrap_or_else(|_| std::fs::read_dir(".").unwrap())
             .filter_map(|e| e.ok())
-            .filter(|e| e.path().extension().map_or(false, |ext| ext == "jsonl"))
+            .filter(|e| e.path().extension().is_some_and(|ext| ext == "jsonl"))
             .collect();
         files.sort_by(|a, b| b.file_name().cmp(&a.file_name()));
 

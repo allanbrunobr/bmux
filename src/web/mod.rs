@@ -8,7 +8,7 @@ use anyhow::Result;
 use axum::{
     Router,
     http::{HeaderValue, Method},
-    routing::{get, post},
+    routing::get,
 };
 use tokio::sync::broadcast;
 use tower_http::{
