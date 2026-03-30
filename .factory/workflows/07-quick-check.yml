@@ -1,0 +1,38 @@
+# MedScribe AI - Quick Check Workflow
+# Lightweight checks for small PRs
+# Use for: minor changes, hotfixes
+
+name: Quick Check
+description: Fast quality check for small changes
+
+trigger:
+  - pull_request:
+      types: [small, hotfix]
+
+jobs:
+  quick-security:
+    name: Quick Security Scan
+    droid: security-auditor
+    priority: high
+    timeout: 5m
+    prompt: |
+      Quick security scan - focus on:
+      1. No new hardcoded secrets
+      2. No PHI exposure
+      3. No new unsafe patterns
+      
+      Skip detailed analysis, just flag blockers.
+
+  quick-review:
+    name: Quick Code Review
+    droid: code-reviewer-evo
+    priority: medium
+    timeout: 5m
+    depends_on: quick-security
+    prompt: |
+      Quick review - focus on:
+      1. Obvious bugs
+      2. Breaking changes
+      3. Missing error handling
+      
+      Skip style issues, focus on functionality.

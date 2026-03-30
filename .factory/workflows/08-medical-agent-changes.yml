@@ -1,0 +1,104 @@
+# MedScribe AI - Medical Agent Changes Workflow
+# CRITICAL: Runs when any medical agent is modified
+# Extra scrutiny for patient safety
+
+name: Medical Agent Review
+description: Deep review for medical agent changes
+
+trigger:
+  - pull_request:
+      paths:
+        - backend/app/agents/*.py
+        - backend/app/agents/specialists/*.py
+
+jobs:
+  # ═══════════════════════════════════════════════════════════════
+  # MANDATORY: All three must pass
+  # ═══════════════════════════════════════════════════════════════
+  
+  safety-audit:
+    name: "🚨 Safety Audit"
+    droid: security-auditor
+    priority: critical
+    fail_fast: true
+    prompt: |
+      CRITICAL: Medical agent code changed!
+      
+      MANDATORY CHECKS:
+      1. Red flag detection still works (pre-eclampsia, ACS, stroke)
+      2. Critic validation not bypassed
+      3. No new PHI exposure
+      4. Error handling preserves safety
+      
+      BLOCK MERGE if any safety regression detected.
+
+  prompt-safety:
+    name: "🏥 Medical Prompt Safety"
+    droid: medical-prompt-auditor
+    priority: critical
+    fail_fast: true
+    depends_on: safety-audit
+    prompt: |
+      Verify medical prompt safety:
+      
+      1. COORDINATOR changes:
+         - Delegation order preserved (safety first)
+         - All 8 sub-agents still referenced
+         - No removed safety checks
+      
+      2. SAFETY AGENT changes:
+         - All emergency conditions listed
+         - Severity levels correct
+         - Action items present
+      
+      3. DIAGNOSTIC AGENT changes:
+         - Bayesian logic intact
+         - Differential diagnosis ordered
+         - Probability calculations valid
+      
+      4. MEDICATION AGENT changes:
+         - Known interactions preserved
+         - FDA API fallback exists
+         - Allergy checks present
+      
+      COMPARE with previous version and flag removals.
+
+  test-generation:
+    name: "🧪 Generate Safety Tests"
+    droid: test-writer-evo
+    priority: high
+    depends_on: prompt-safety
+    prompt: |
+      Generate NEW tests for changed agent behavior:
+      
+      FOR EACH CHANGED AGENT:
+      1. Test current behavior
+      2. Test edge cases
+      3. Test error conditions
+      4. Test Portuguese output
+      
+      CRITICAL SCENARIOS:
+      - Gestante + PA alta + cefaleia → pre-eclampsia alert
+      - Dor torácica + irradiação → ACS pathway
+      - NSAIDs + Losartana → drug interaction
+      - API timeout → graceful fallback
+      
+      SAVE TO: tests/test_agent_changes_<date>.py
+
+  human-review-required:
+    name: "👨‍⚕️ Human Review Required"
+    type: approval
+    depends_on: test-generation
+    approvers:
+      - medical-team
+      - tech-lead
+    message: |
+      ⚠️ MEDICAL AGENT CODE CHANGED
+      
+      This PR modifies patient-facing AI logic.
+      Please review:
+      - Automated test results
+      - Prompt changes diff
+      - Safety audit findings
+      
+      A medical team member must approve.

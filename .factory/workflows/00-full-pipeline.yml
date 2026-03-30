@@ -1,0 +1,99 @@
+# MedScribe AI - Full CI/CD Pipeline
+# Complete pipeline that runs all quality checks
+# Use for: main branch merges, releases
+
+name: Full Pipeline
+description: Complete CI/CD pipeline with all quality gates
+
+trigger:
+  - push:
+      branches: [main, develop]
+  - release
+
+jobs:
+  # ═══════════════════════════════════════════════════════════════
+  # STAGE 1: SAFETY (Must pass first)
+  # ═══════════════════════════════════════════════════════════════
+  
+  safety-gate:
+    name: "🔴 Safety Gate"
+    workflow: 01-pr-safety-gate.yml
+    priority: critical
+    fail_fast: true
+
+  # ═══════════════════════════════════════════════════════════════
+  # STAGE 2: CODE QUALITY (After safety passes)
+  # ═══════════════════════════════════════════════════════════════
+  
+  code-quality:
+    name: "🟡 Code Quality"
+    workflow: 02-code-quality.yml
+    depends_on: safety-gate
+    priority: high
+
+  # ═══════════════════════════════════════════════════════════════
+  # STAGE 3: SPECIALIZED REVIEWS (Parallel)
+  # ═══════════════════════════════════════════════════════════════
+  
+  api-review:
+    name: "🔵 API Review"
+    workflow: 04-api-review.yml
+    depends_on: code-quality
+    priority: medium
+    parallel: true
+
+  frontend-quality:
+    name: "🔵 Frontend Quality"
+    workflow: 05-frontend-quality.yml
+    depends_on: code-quality
+    priority: medium
+    parallel: true
+
+  prompt-optimization:
+    name: "🔵 Prompt Optimization"
+    workflow: 03-prompt-optimization.yml
+    depends_on: code-quality
+    priority: medium
+    parallel: true
+
+  # ═══════════════════════════════════════════════════════════════
+  # STAGE 4: DOCUMENTATION (On release)
+  # ═══════════════════════════════════════════════════════════════
+  
+  documentation:
+    name: "🟢 Documentation"
+    workflow: 06-documentation.yml
+    depends_on: 
+      - api-review
+      - frontend-quality
+    priority: low
+    condition: release
+
+# ═══════════════════════════════════════════════════════════════
+# PIPELINE VISUALIZATION
+# ═══════════════════════════════════════════════════════════════
+#
+#                    ┌─────────────────┐
+#                    │  SAFETY GATE    │
+#                    │  (CRITICAL)     │
+#                    └────────┬────────┘
+#                             │
+#                    ┌────────▼────────┐
+#                    │  CODE QUALITY   │
+#                    │  (HIGH)         │
+#                    └────────┬────────┘
+#                             │
+#          ┌──────────────────┼──────────────────┐
+#          │                  │                  │
+#   ┌──────▼──────┐   ┌───────▼───────┐   ┌──────▼──────┐
+#   │ API REVIEW  │   │   FRONTEND    │   │   PROMPT    │
+#   │ (MEDIUM)    │   │   (MEDIUM)    │   │   (MEDIUM)  │
+#   └──────┬──────┘   └───────┬───────┘   └──────┬──────┘
+#          │                  │                  │
+#          └──────────────────┼──────────────────┘
+#                             │
+#                    ┌────────▼────────┐
+#                    │ DOCUMENTATION   │
+#                    │ (On Release)    │
+#                    └─────────────────┘
+#

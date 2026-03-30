@@ -1,0 +1,151 @@
+# MedScribe AI - Pre-Push Review
+# Reviews commits before pushing to remote
+# Suggests squash/rebase if needed
+
+name: Pre-Push Review
+description: Review commits before pushing
+
+trigger:
+  - pre-push
+  - command: "droid review-commits"
+
+jobs:
+  analyze-commits:
+    name: "🔍 Analyze Commits to Push"
+    droid: code-reviewer-evo
+    prompt: |
+      Analyze commits that will be pushed:
+      
+      ```bash
+      git log origin/{{ branch }}..HEAD --oneline
+      ```
+      
+      CHECK FOR:
+      
+      1. COMMIT QUALITY
+         - [ ] Messages follow Conventional Commits?
+         - [ ] No "WIP", "fix", "update" only messages?
+         - [ ] Logical commit separation?
+      
+      2. SQUASH CANDIDATES
+         - Multiple "fix typo" commits → squash
+         - "WIP" followed by completion → squash
+         - Same file edited in multiple commits → consider squash
+      
+      3. REORDER CANDIDATES
+         - Tests committed after code they test?
+         - Config changes mixed with features?
+      
+      4. SENSITIVE CONTENT
+         - Any commit adding secrets?
+         - Any commit with PHI?
+         - Any TODO/FIXME that shouldn't be pushed?
+      
+      OUTPUT:
+      ```
+      📊 COMMITS TO PUSH: X commits
+      
+      COMMIT ANALYSIS:
+      1. abc1234 - feat(api): add endpoint ✅ Good
+      2. def5678 - fix typo ⚠️ Consider squash with #1
+      3. ghi9012 - WIP ❌ Should not push WIP commits
+      
+      RECOMMENDATIONS:
+      - Squash commits 1-2: `git rebase -i HEAD~2`
+      - Reword commit 3: `git commit --amend`
+      
+      RISK: Low / Medium / High
+      ```
+
+  suggest-squash:
+    name: "✂️ Suggest Squash"
+    depends_on: analyze-commits
+    condition: |
+      analysis.squash_candidates.length > 0
+    prompt: |
+      SQUASH RECOMMENDATION
+      
+      These commits could be combined:
+      
+      {{ squash_candidates }}
+      
+      SUGGESTED COMMANDS:
+      ```bash
+      # Interactive rebase to squash
+      git rebase -i HEAD~{{ commit_count }}
+      
+      # In the editor, change 'pick' to 'squash' (or 's') for commits to combine
+      # Example:
+      pick abc1234 feat(api): add endpoint
+      squash def5678 fix typo
+      squash ghi9012 add tests
+      ```
+      
+      RESULTING MESSAGE:
+      ```
+      feat(api): add user endpoint
+      
+      - Implemented POST /api/users
+      - Added input validation
+      - Added unit tests
+      ```
+      
+      Proceed with squash? (y/n/skip)
+
+  medical-commit-check:
+    name: "🏥 Medical Commit Check"
+    priority: critical
+    condition: |
+      commits.any(c => c.files.any(f => f.includes('agents/')))
+    prompt: |
+      ⚠️ MEDICAL COMMITS DETECTED
+      
+      These commits modify medical AI code:
+      
+      {{ medical_commits }}
+      
+      CHECKLIST BEFORE PUSH:
+      - [ ] Safety tests pass locally?
+      - [ ] Critic validation not bypassed?
+      - [ ] Red flag detection still works?
+      - [ ] Portuguese language maintained?
+      
+      Run safety tests:
+      ```bash
+      pytest tests/test_medical_safety.py -v
+      ```
+      
+      Push anyway? (y/n)
+      
+      NOTE: PR will require medical team approval.
+
+  final-confirmation:
+    name: "✅ Push Confirmation"
+    depends_on: 
+      - analyze-commits
+      - suggest-squash
+      - medical-commit-check
+    interactive: true
+    prompt: |
+      READY TO PUSH
+      =============
+      
+      Branch: {{ branch }}
+      Remote: {{ remote }}
+      Commits: {{ commit_count }}
+      
+      Summary:
+      {{ commit_summary }}
+      
+      Checks:
+      - Message quality: {{ message_quality }}
+      - Squash needed: {{ needs_squash }}
+      - Medical changes: {{ has_medical }}
+      
+      Commands:
+      [P] Push now: git push origin {{ branch }}
+      [F] Force push: git push -f origin {{ branch }}
+      [R] Rebase first: git rebase -i HEAD~{{ count }}
+      [A] Abort
+      
+      Choice:

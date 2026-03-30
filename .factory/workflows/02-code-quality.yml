@@ -1,0 +1,96 @@
+# MedScribe AI - Code Quality Workflow
+# Reviews code quality and fixes Python bugs
+# Priority: HIGH - Runs after safety checks
+
+name: Code Quality Review
+description: Code review and bug detection for backend
+
+trigger:
+  - pull_request
+
+jobs:
+  code-review:
+    name: Code Review
+    droid: code-reviewer-evo
+    priority: high
+    paths:
+      - backend/**/*.py
+    prompt: |
+      Review Python code changes in MedScribe AI backend:
+      
+      FOCUS AREAS:
+      1. COORDINATOR LOGIC (backend/app/agents/coordinator.py)
+         - Delegation to 8 sub-agents is correct
+         - Priority order: safety > diagnostic > medication
+         - No infinite delegation loops
+         - Edge cases handled (empty input, invalid data)
+      
+      2. TOOL IMPLEMENTATIONS (backend/app/agents/tools/)
+         - clinical_tools.py: Async/sync mixing issues
+         - drug_api_tools.py: Error handling for FDA/RxNorm
+         - Timeout handling and retries
+      
+      3. SPECIALIST AGENTS
+         - Each agent MUST call save_clinical_insight
+         - Bayesian updates in diagnostic.py are mathematically correct
+         - Likelihood ratios are reasonable
+      
+      4. API ENDPOINTS
+         - Input validation
+         - Error responses
+         - Rate limiting
+      
+      CODE QUALITY CHECKS:
+      - Type hints present and correct
+      - Docstrings complete
+      - No hardcoded values
+      - Proper exception handling
+      - Logging for debugging
+
+  bug-detection:
+    name: Bug Detection & Fix
+    droid: python-bug-fixer-evo
+    priority: high
+    depends_on: code-review
+    paths:
+      - backend/**/*.py
+    prompt: |
+      Detect and fix bugs in MedScribe AI backend:
+      
+      KNOWN ISSUES TO CHECK:
+      
+      1. CRITIC BYPASS BUG (clinical_tools.py:87)
+         ```python
+         # Current: If critic fails, exception may not propagate
+         response = await client.aio.models.generate_content(...)
+         # MUST verify: What if this raises? Is insight still saved?
+         ```
+      
+      2. ASYNC/SYNC MIXING
+         ```python
+         # save_clinical_insight is async but calls sync httpx
+         # Potential deadlock in event loop
+         def _make_request_sync(url, params):  # This is sync!
+             with httpx.Client(timeout=TIMEOUT) as client:
+         ```
+      
+      3. STATE PERSISTENCE
+         ```python
+         # diagnostic_state not persisted between sessions
+         # Bayesian updates lost on session end
+         tool_context.state["diagnostic_state"] = diagnostic_state
+         ```
+      
+      4. FDA API FALLBACK
+         ```python
+         # If RxNorm/FDA return 404, known interactions not checked
+         # LLM knowledge not used as fallback
+         if "error" in result:
+             return result  # Should fallback to LLM knowledge!
+         ```
+      
+      FIX PRIORITIES:
+      - CRITICAL: Critic bypass
+      - HIGH: FDA fallback
+      - MEDIUM: Async/sync mixing
+      - LOW: State persistence

@@ -1,0 +1,66 @@
+# MedScribe AI - Prompt Optimization Workflow
+# Optimizes medical AI prompts for efficiency and accuracy
+# Priority: MEDIUM - Runs on prompt changes
+
+name: Prompt Optimization
+description: Optimize LLM prompts for medical agents
+
+trigger:
+  - pull_request
+  - manual
+
+paths:
+  - backend/app/agents/**
+
+jobs:
+  prompt-analysis:
+    name: Prompt Analysis & Optimization
+    droid: prompt-engineer-evo
+    priority: medium
+    prompt: |
+      Analyze and optimize medical AI prompts in MedScribe:
+      
+      CURRENT PROMPT SIZES (TOO LARGE):
+      - coordinator.py: ~2500 tokens (COORDINATOR_INSTRUCTION)
+      - safety.py: ~1800 tokens (SAFETY_INSTRUCTION)
+      - diagnostic.py: ~3200 tokens (DIAGNOSTIC_INSTRUCTION)
+      - medication.py: ~2000 tokens (MEDICATION_INSTRUCTION)
+      - history_taker.py: ~2800 tokens
+      - empathy_critic.py: ~2400 tokens
+      
+      OPTIMIZATION GOALS:
+      1. Reduce token count by 30-40% without losing capability
+      2. Improve instruction clarity
+      3. Add few-shot examples for critical paths
+      4. Ensure Portuguese consistency
+      
+      TECHNIQUES TO APPLY:
+      
+      1. STRUCTURED COMPRESSION
+         Before: "When you receive input, analyze it for these triggers..."
+         After:  "## Triggers\n| Pattern | Action | Priority |"
+      
+      2. REMOVE REDUNDANCY
+         - Same instructions repeated in multiple agents
+         - Verbose explanations that could be tables
+         - Unnecessary preambles
+      
+      3. ADD FEW-SHOT EXAMPLES
+         ```
+         ## Examples
+         Input: "Gestante 32sem, PA 150/95, cefaleia"
+         → Delegate: safety_specialist (pre-eclampsia risk)
+         → Then: diagnostic_specialist, protocol_specialist
+         ```
+      
+      4. CRITICAL PATH CLARITY
+         - Red flag detection MUST be explicit
+         - Tool calls MUST be required, not optional
+         - Language requirement (Portuguese) in one place
+      
+      OUTPUT:
+      - Optimized prompts for each agent
+      - Token count comparison (before/after)
+      - Test cases to validate no capability loss
+      
+      SAVE TO: docs/prompt-optimization-report.md

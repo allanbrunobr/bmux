@@ -1,0 +1,78 @@
+# MedScribe AI - Commit Message Validation
+# Validates commit message format
+# Runs as commit-msg hook
+
+name: Commit Message Validation
+description: Validate commit message follows Conventional Commits
+
+trigger:
+  - commit-msg
+
+timeout: 5s  # Must be instant
+
+jobs:
+  validate-format:
+    name: "✅ Validate Format"
+    priority: high
+    fail_fast: true
+    rules:
+      # First line format
+      - pattern: "^(feat|fix|docs|style|refactor|perf|test|chore|security|medical)(\\(.+\\))?: .{1,72}$"
+        error: "First line must follow: type(scope): description (max 72 chars)"
+      
+      # No period at end
+      - pattern: "^[^.]+$"
+        line: 1
+        error: "First line should not end with a period"
+      
+      # Blank line after subject
+      - pattern: "^.+\\n\\n"
+        condition: "lines > 1"
+        error: "Blank line required between subject and body"
+      
+      # Body line length
+      - pattern: "^.{0,100}$"
+        lines: "2+"
+        error: "Body lines should be max 100 chars"
+
+  validate-medical-scope:
+    name: "🏥 Validate Medical Scope"
+    priority: critical
+    condition: |
+      staged_files.any(f => f.path.includes('agents/'))
+    rules:
+      # Medical changes should use medical type or mention safety
+      - pattern: "(medical|feat|fix).*(agent|safety|diagnostic|medication|critic)"
+        error: |
+          Changes to medical agents detected but commit message 
+          doesn't reflect this. Use:
+          - medical(scope): for medical logic changes
+          - feat(scope): for new medical features
+          - fix(scope): for medical bug fixes
+          
+          And mention affected medical functionality in body.
+
+  suggest-improvement:
+    name: "💡 Suggest Improvements"
+    droid: documentation-writer-evo
+    priority: low
+    condition: |
+      commit_message.length < 50 || !commit_message.includes('\n\n')
+    prompt: |
+      The commit message could be more descriptive:
+      
+      Current message:
+      ```
+      {{ commit_message }}
+      ```
+      
+      Staged files:
+      {{ staged_files }}
+      
+      SUGGESTIONS:
+      1. Add a body explaining WHY this change was made
+      2. Reference related issues or tickets
+      3. Mention any breaking changes
+      4. For medical changes, note affected conditions
+      
+      This is a suggestion, not a block.

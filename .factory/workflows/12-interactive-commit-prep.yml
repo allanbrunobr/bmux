@@ -1,0 +1,149 @@
+# MedScribe AI - Interactive Commit Preparation
+# Helps prepare commits with AI assistance
+# Use: droid prepare-commit
+
+name: Interactive Commit Prep
+description: AI-assisted commit preparation workflow
+
+trigger:
+  - command: "droid prepare-commit"
+  - command: "droid pc"  # Short alias
+
+jobs:
+  analyze-staged:
+    name: "🔍 Analyze Staged Changes"
+    droid: code-reviewer-evo
+    prompt: |
+      Analyze all staged changes and provide a summary:
+      
+      OUTPUT FORMAT:
+      ```
+      📊 STAGED CHANGES SUMMARY
+      ========================
+      
+      Files: X files changed
+      Lines: +XX / -XX
+      
+      CATEGORIES:
+      - Backend: X files
+      - Frontend: X files
+      - Tests: X files
+      - Config: X files
+      - Medical Agents: X files ⚠️
+      
+      CHANGE TYPES DETECTED:
+      - [ ] New feature
+      - [ ] Bug fix
+      - [ ] Refactoring
+      - [ ] Documentation
+      - [ ] Tests
+      - [ ] Medical logic change
+      
+      COMPLEXITY: Low / Medium / High
+      
+      RISK ASSESSMENT:
+      - Patient safety impact: None / Low / Medium / High
+      - Breaking changes: Yes / No
+      - Requires migration: Yes / No
+      ```
+
+  check-completeness:
+    name: "📋 Check Completeness"
+    droid: code-reviewer-evo
+    depends_on: analyze-staged
+    prompt: |
+      Check if the staged changes are complete:
+      
+      CHECKLIST:
+      
+      1. TESTS
+         - [ ] New code has tests?
+         - [ ] Existing tests updated if behavior changed?
+         - [ ] Medical agents have safety tests?
+      
+      2. DOCUMENTATION
+         - [ ] Docstrings added/updated?
+         - [ ] README updated if needed?
+         - [ ] API docs updated?
+      
+      3. TYPES
+         - [ ] TypeScript types match backend models?
+         - [ ] No 'any' types added?
+      
+      4. RELATED FILES
+         - [ ] All related changes included?
+         - [ ] No orphan imports?
+         - [ ] Migrations included if schema changed?
+      
+      MISSING ITEMS:
+      List any files that should probably be staged but aren't.
+
+  generate-message:
+    name: "📝 Generate Message"
+    droid: code-reviewer-evo
+    depends_on: check-completeness
+    prompt: |
+      Generate commit message options:
+      
+      OPTION 1 (Concise):
+      ```
+      type(scope): short description
+      ```
+      
+      OPTION 2 (Detailed):
+      ```
+      type(scope): short description
+      
+      Detailed explanation of what changed and why.
+      
+      - Bullet points of key changes
+      - Another change
+      
+      Closes #XX
+      ```
+      
+      OPTION 3 (Medical - if applicable):
+      ```
+      medical(scope): description with safety context
+      
+      SAFETY IMPACT:
+      - Affected conditions: X, Y, Z
+      - Risk level: Low/Medium/High
+      - Validation: Critic approved / Tests pass
+      
+      Changes:
+      - What changed
+      - Why it changed
+      
+      Reviewed-by: medical-team
+      ```
+      
+      USER CHOICE:
+      Which message would you like to use? (1/2/3/custom)
+
+  final-review:
+    name: "✅ Final Review"
+    depends_on: generate-message
+    prompt: |
+      READY TO COMMIT
+      ===============
+      
+      Message:
+      ```
+      {{ selected_message }}
+      ```
+      
+      Files to be committed:
+      {{ staged_files }}
+      
+      Pre-commit checks:
+      - [ ] Secrets scan: PASS
+      - [ ] PHI check: PASS
+      - [ ] Lint: PASS
+      
+      Commands:
+      - Commit now: `git commit -m "{{ message }}"`
+      - Edit message: `droid commit --edit`
+      - Abort: `git reset HEAD`
+      
+      Proceed? (y/n/edit)

@@ -1,0 +1,158 @@
+# MedScribe AI - Changelog Generator
+# Generates CHANGELOG from commit history
+# Use: droid changelog or on release
+
+name: Changelog Generator
+description: Generate CHANGELOG from commits using AI
+
+trigger:
+  - command: "droid changelog"
+  - release
+  - tag
+
+jobs:
+  analyze-commits:
+    name: "📜 Analyze Commits"
+    droid: documentation-writer-evo
+    prompt: |
+      Analyze git commits since last release/tag and generate CHANGELOG:
+      
+      INPUT:
+      ```bash
+      git log $(git describe --tags --abbrev=0 2>/dev/null || echo "HEAD~50")..HEAD \
+        --pretty=format:"%h|%s|%b|%an|%ad" --date=short
+      ```
+      
+      GROUP BY TYPE:
+      
+      ### 🚀 New Features (feat)
+      - Feature descriptions
+      
+      ### 🐛 Bug Fixes (fix)
+      - Bug fix descriptions
+      
+      ### 🏥 Medical Changes (medical)
+      ⚠️ IMPORTANT: Changes affecting clinical AI behavior
+      - Medical change descriptions
+      - Safety implications noted
+      
+      ### 🔒 Security (security)
+      - Security improvements
+      
+      ### 📚 Documentation (docs)
+      - Documentation updates
+      
+      ### 🔧 Maintenance (chore, refactor)
+      - Maintenance items
+      
+      ### ⚡ Performance (perf)
+      - Performance improvements
+      
+      ### 🧪 Tests (test)
+      - Test additions/updates
+      
+      FORMAT:
+      ```markdown
+      # Changelog
+      
+      ## [X.Y.Z] - YYYY-MM-DD
+      
+      ### 🚀 New Features
+      - **scope**: Description ([commit](link)) - @author
+      
+      ### 🐛 Bug Fixes
+      - **scope**: Description ([commit](link)) - @author
+      
+      ### 🏥 Medical Changes
+      > ⚠️ These changes affect clinical AI behavior. Review carefully.
+      - **safety**: Description of medical change
+        - Affected conditions: X, Y
+        - Risk level: Low/Medium/High
+      
+      ...
+      
+      ### Breaking Changes
+      - Description of breaking change and migration path
+      
+      ### Contributors
+      - @contributor1
+      - @contributor2
+      ```
+      
+      RULES:
+      1. Group commits by type
+      2. Highlight medical changes prominently
+      3. Note breaking changes
+      4. Include commit links
+      5. Credit contributors
+      6. Use Portuguese for descriptions if commits are in Portuguese
+
+  medical-summary:
+    name: "🏥 Medical Changes Summary"
+    droid: medical-prompt-auditor
+    depends_on: analyze-commits
+    condition: |
+      commits.any(c => c.type == 'medical' || c.scope.includes('agent'))
+    prompt: |
+      Generate a MEDICAL CHANGES SUMMARY for this release:
+      
+      This section appears at the TOP of the changelog for releases
+      with medical AI changes.
+      
+      FORMAT:
+      ```markdown
+      ## ⚠️ Medical AI Changes in This Release
+      
+      This release includes changes to clinical AI behavior.
+      Healthcare providers should review before deploying.
+      
+      ### Summary of Medical Changes
+      
+      | Component | Change | Impact | Risk |
+      |-----------|--------|--------|------|
+      | Safety Agent | Updated pre-eclampsia thresholds | More sensitive detection | Low |
+      | Diagnostic | Added Bayesian tracking | Better probability estimates | Low |
+      
+      ### Affected Clinical Conditions
+      - Pre-eclampsia detection
+      - Chest pain triage
+      - Drug interaction checking
+      
+      ### Validation Status
+      - [ ] Automated safety tests: PASS
+      - [ ] Medical team review: PENDING
+      - [ ] Staging environment tested: YES/NO
+      
+      ### Rollback Instructions
+      If issues arise, rollback to version X.Y.Z:
+      ```bash
+      git checkout vX.Y.Z
+      ```
+      ```
+
+  update-changelog:
+    name: "📝 Update CHANGELOG.md"
+    depends_on: 
+      - analyze-commits
+      - medical-summary
+    run: |
+      # Prepend new version to CHANGELOG.md
+      NEW_CONTENT="{{ changelog_content }}"
+      
+      if [ -f CHANGELOG.md ]; then
+        # Insert after header
+        sed -i '1,/^## \[/{ /^## \[/i\
+      '"$NEW_CONTENT"'
+      }' CHANGELOG.md
+      else
+        echo "# Changelog\n\n$NEW_CONTENT" > CHANGELOG.md
+      fi
+      
+      echo "✅ CHANGELOG.md updated"
+      echo ""
+      echo "Review changes:"
+      echo "  git diff CHANGELOG.md"
+      echo ""
+      echo "Commit changelog:"
+      echo "  git add CHANGELOG.md"
+      echo "  git commit -m 'docs: update changelog for vX.Y.Z'"

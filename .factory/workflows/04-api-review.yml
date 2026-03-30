@@ -1,0 +1,72 @@
+# MedScribe AI - API Design Review Workflow
+# Reviews API endpoints and external integrations
+# Priority: MEDIUM - Runs on API changes
+
+name: API Design Review
+description: Review and improve API design for medical endpoints
+
+trigger:
+  - pull_request
+
+paths:
+  - backend/app/api/**
+  - backend/app/agents/tools/drug_api_tools.py
+
+jobs:
+  api-review:
+    name: API Design Review
+    droid: api-designer-evo
+    priority: medium
+    prompt: |
+      Review API design for MedScribe AI medical system:
+      
+      ENDPOINTS TO REVIEW:
+      - /api/endpoints/agent.py - AI agent interaction
+      - /api/endpoints/live.py - Real-time transcription
+      - /api/endpoints/insights.py - Clinical insights CRUD
+      - /api/endpoints/feedback.py - Feedback collection
+      - /api/endpoints/visits.py - Patient visits
+      - /api/endpoints/persons.py - Patient data
+      - /api/endpoints/providers.py - Healthcare providers
+      
+      REVIEW CHECKLIST:
+      
+      1. ERROR HANDLING
+         - [ ] All endpoints have try/catch
+         - [ ] Meaningful error messages (no stack traces to client)
+         - [ ] Proper HTTP status codes
+         - [ ] Validation errors return 422 with details
+      
+      2. RATE LIMITING (CRITICAL for medical APIs)
+         - [ ] /live endpoint: Max 10 req/min per session
+         - [ ] /insights endpoint: Max 100 req/min
+         - [ ] FDA/RxNorm calls: Max 30 req/min (their limit)
+      
+      3. INPUT VALIDATION
+         - [ ] Pydantic models for all request bodies
+         - [ ] Sanitize clinical text input
+         - [ ] Validate patient IDs format
+      
+      4. RESPONSE STRUCTURE
+         - [ ] Consistent response format across endpoints
+         - [ ] Pagination for list endpoints
+         - [ ] Include metadata (timestamp, version)
+      
+      5. EXTERNAL API RESILIENCE
+         ```python
+         # drug_api_tools.py needs:
+         - Retry logic with exponential backoff
+         - Circuit breaker pattern
+         - Fallback to cached data
+         - Graceful degradation
+         ```
+      
+      6. AUTHENTICATION & AUTHORIZATION
+         - [ ] JWT validation on all protected routes
+         - [ ] Role-based access (doctor, nurse, admin)
+         - [ ] Audit logging for PHI access
+      
+      OUTPUT:
+      - API improvement recommendations
+      - OpenAPI spec updates if needed
+      - Error handling code snippets

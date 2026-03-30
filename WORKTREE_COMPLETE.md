@@ -1,48 +1,57 @@
-# Worktree wt1 — COMPLETE
+# Worktree wt2 — COMPLETE
 
-Branch: `bmux-web-wt1`
-Completed: 2026-03-29
+**Branch:** `bmux-web-wt2`
+**Completed:** 2026-03-29
 
-## Stories implemented
+## Stories Delivered
 
 | Story | Title | Status |
 |-------|-------|--------|
-| 1.1 | Axum Server Scaffold & Sessions Endpoint | done |
-| 1.2 | Agents Endpoint | done |
-| 1.3 | Context, Tasks & Metrics Endpoints | done |
-| 1.4 | Static File Serving & `bmux web` CLI | done |
-| 1.5 | POST /api/tasks — Send Task from Browser | done |
-| 2.1 | WebSocket Endpoint & Event Broadcaster | done |
-| 2.2 | BmuxEvent Enum & Emission Points | done |
-| 2.3 | Client Reconnection & Multi-Client Support | done |
+| 3.1 | Next.js Project Scaffold & Layout | ✅ done |
+| 3.2 | Session Selector & WebSocket Connection | ✅ done |
+| 3.3 | Agent Cards Grid | ✅ done |
+| 3.4 | Shared Context Live Feed | ✅ done |
+| 3.5 | Task Queue Table | ✅ done |
+| 3.6 | Send Task Modal | ✅ done |
 
-## Files created / modified
+## Build Verification
 
-### New files
-- `src/web/mod.rs` — web server entry point, spawns Axum on port 7432
-- `src/web/events.rs` — `BmuxEvent` enum (agent_spawned, agent_killed, context_updated, task_dispatched, task_completed)
-- `src/web/routes.rs` — all REST handlers + Axum `AppState`
-- `src/web/websocket.rs` — WS upgrade handler, snapshot-on-connect, broadcast fan-out
+```
+npm run build → static export in bmux-web/out/
+✓ Compiled successfully (zero TypeScript errors)
+✓ 6 static routes generated
+```
 
-### Modified files
-- `Cargo.toml` — added axum 0.7 (ws), tower-http 0.5 (cors+fs), tokio-tungstenite 0.21
-- `src/lib.rs` — added `pub mod web;`
-- `src/tui/server.rs` — made `DaemonState` pub(crate), added `web_events_tx`, spawns Axum, emits events
-- `src/main.rs` — added `bmux web [--port N] [--no-open]` subcommand
+## Key Files
 
-## API surface
+```
+bmux-web/
+├── src/lib/types.ts          — Agent, Task, ContextEntry, Metrics, BmuxEvent
+├── src/lib/bmux-client.ts    — REST client with mock fallback
+├── src/lib/store.ts          — Zustand store + WebSocket event handler
+├── src/lib/mock-data.ts      — Dev mock data
+├── src/hooks/useBmuxWebSocket.ts  — WS hook, exponential backoff reconnect
+├── src/hooks/useAgents.ts    — Agent data loader
+├── src/components/
+│   ├── AgentCard.tsx         — Agent card with type icon, status badge, tokens
+│   ├── AgentsGrid.tsx        — Responsive 1/2/3-col grid
+│   ├── ContextFeed.tsx       — Live feed, expandable values, highlight animation
+│   ├── TaskQueue.tsx         — Task table with status filter tabs
+│   ├── SendTaskModal.tsx     — POST /api/tasks modal with toast
+│   ├── SessionSelector.tsx   — Auto-selects single session
+│   ├── ConnectionStatus.tsx  — Green/red connection indicator
+│   └── BmuxProvider.tsx      — Initializes data + WebSocket
+└── src/app/                  — Dashboard, Agents, Context, Tasks, Metrics pages
+```
 
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/api/sessions` | List all active sessions |
-| GET | `/api/agents?session=<name>` | List agents in session |
-| GET | `/api/context?session=<name>` | List context entries |
-| GET | `/api/tasks?session=<name>` | List tasks |
-| GET | `/api/metrics?session=<name>` | Aggregate metrics |
-| POST | `/api/tasks` | Send task to agent |
-| GET | `/ws?session=<name>` | WebSocket stream |
-| GET | `/` | Static Next.js build (web-dist/) |
+## API Expected (Feature 4-5, wt1)
 
-## Test results
+- `GET /api/sessions` → `Session[]`
+- `GET /api/agents?session=<name>` → `Agent[]`
+- `GET /api/context?session=<name>` → `ContextEntry[]`
+- `GET /api/tasks?session=<name>` → `Task[]`
+- `GET /api/metrics?session=<name>` → `Metrics`
+- `POST /api/tasks` `{ session, to_agent, content }` → `{ id }`
+- `WS /ws?session=<name>` → `BmuxEvent` JSON stream
 
-`cargo test` — all tests pass (32 unit + integration tests).
+Falls back to mock data automatically when backend is unavailable.

@@ -1,0 +1,115 @@
+# MedScribe AI - Frontend Quality Workflow
+# Reviews React/TypeScript frontend code
+# Priority: MEDIUM - Runs on frontend changes
+
+name: Frontend Quality
+description: Review React components and TypeScript code
+
+trigger:
+  - pull_request
+
+paths:
+  - frontend/**
+
+jobs:
+  react-review:
+    name: React Component Review
+    droid: react-specialist-evo
+    priority: medium
+    prompt: |
+      Review React components in MedScribe AI frontend:
+      
+      CRITICAL COMPONENTS:
+      - TranscriptionView.tsx - Real-time transcription display
+      - SummaryPanel.tsx - Clinical summary
+      - InsightCard.tsx - Individual insight display
+      - MedicalReportModal.tsx - Report generation
+      
+      HOOKS TO REVIEW:
+      - useAdkInsights.ts - ADK integration with debounce
+      - useSession.ts - Session management
+      
+      REVIEW CHECKLIST:
+      
+      1. RACE CONDITIONS (useAdkInsights.ts)
+         ```typescript
+         // DEBOUNCE_DELAY = 500ms
+         // What if user types fast and multiple API calls overlap?
+         // Is lastAnalyzedText properly managed?
+         ```
+      
+      2. STATE MANAGEMENT
+         - [ ] No stale closures in useEffect
+         - [ ] Proper cleanup on unmount
+         - [ ] Optimistic updates for better UX
+      
+      3. ERROR HANDLING
+         - [ ] ErrorBoundary wraps critical components
+         - [ ] User-friendly error messages
+         - [ ] Retry mechanisms for failed API calls
+      
+      4. PERFORMANCE
+         - [ ] Memoization where needed (useMemo, useCallback)
+         - [ ] Virtualization for long insight lists
+         - [ ] Lazy loading for modals
+      
+      5. ACCESSIBILITY (Medical context!)
+         - [ ] Screen reader support
+         - [ ] Keyboard navigation
+         - [ ] Color contrast for severity indicators
+         - [ ] ARIA labels on interactive elements
+      
+      6. REAL-TIME UPDATES
+         - [ ] WebSocket/SSE for live transcription
+         - [ ] Graceful reconnection
+         - [ ] Loading states during updates
+
+  typescript-bugs:
+    name: TypeScript Bug Detection
+    droid: typescript-bug-fixer-evo
+    priority: medium
+    depends_on: react-review
+    prompt: |
+      Find and fix TypeScript issues in MedScribe frontend:
+      
+      FOCUS AREAS:
+      
+      1. TYPE SYNC WITH BACKEND
+         ```typescript
+         // frontend/types.ts must match:
+         // - backend/app/models/insight.py
+         // - backend/app/models/soap.py
+         // - API response schemas
+         ```
+      
+      2. STRICT NULL CHECKS
+         ```typescript
+         // Check for potential null/undefined access
+         const insight = insights.find(i => i.id === id);
+         insight.title; // ❌ insight could be undefined!
+         insight?.title; // ✅
+         ```
+      
+      3. API RESPONSE TYPES
+         ```typescript
+         // Ensure API responses are properly typed
+         interface InsightResponse {
+           status: 'success' | 'error';
+           data?: Insight[];
+           error?: string;
+         }
+         ```
+      
+      4. EVENT HANDLER TYPES
+         ```typescript
+         // Proper typing for event handlers
+         const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {...}
+         ```
+      
+      5. GENERIC CONSTRAINTS
+         ```typescript
+         // Hooks with proper generics
+         function useApi<T>(url: string): { data: T | null; error: Error | null }
+         ```
+      
+      RUN: npx tsc --noEmit to check all errors

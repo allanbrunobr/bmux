@@ -1,0 +1,131 @@
+# MedScribe AI - AI Commit Message Generator
+# Generates intelligent commit messages based on staged changes
+# Follows Conventional Commits specification
+
+name: AI Commit Message
+description: Generate commit messages using AI analysis of changes
+
+trigger:
+  - manual
+  - command: "droid commit"
+
+jobs:
+  analyze-changes:
+    name: "📝 Generate Commit Message"
+    droid: code-reviewer-evo
+    priority: medium
+    prompt: |
+      Analyze staged changes and generate a commit message following Conventional Commits:
+      
+      FORMAT:
+      ```
+      <type>(<scope>): <description>
+      
+      [optional body]
+      
+      [optional footer]
+      ```
+      
+      TYPES:
+      - feat: New feature
+      - fix: Bug fix
+      - docs: Documentation only
+      - style: Code style (formatting, semicolons, etc.)
+      - refactor: Code change that neither fixes bug nor adds feature
+      - perf: Performance improvement
+      - test: Adding or updating tests
+      - chore: Build process, dependencies, etc.
+      - security: Security fix or improvement
+      - medical: Changes to medical agents/prompts (CUSTOM for MedScribe)
+      
+      SCOPES for MedScribe:
+      - coordinator: Clinical coordinator agent
+      - safety: Safety specialist agent
+      - diagnostic: Diagnostic specialist agent
+      - medication: Medication specialist agent
+      - critic: Critic validation agent
+      - tools: Clinical tools
+      - api: API endpoints
+      - frontend: React frontend
+      - db: Database/migrations
+      - config: Configuration
+      
+      RULES:
+      1. Description in imperative mood ("add" not "added")
+      2. No period at end of description
+      3. Max 72 chars for first line
+      4. Body explains WHAT and WHY, not HOW
+      5. Reference issues if applicable
+      
+      MEDICAL CHANGES:
+      If changes touch agents/ or specialists/:
+      - Use type "medical" or "feat"
+      - Add "BREAKING:" prefix if behavior changes
+      - Mention affected conditions in body
+      
+      EXAMPLES:
+      
+      ```
+      feat(diagnostic): add Bayesian probability tracking
+      
+      Implements probabilistic state tracking for diagnostic hypotheses
+      based on AMIE architecture. Updates likelihood ratios as new
+      evidence emerges during consultation.
+      
+      Affects: diagnostic_specialist, coordinator delegation
+      ```
+      
+      ```
+      fix(safety): improve pre-eclampsia detection sensitivity
+      
+      Previous implementation missed cases with borderline BP values.
+      Now triggers safety alert for:
+      - BP >= 140/90 (was 150/95)
+      - Any neurological symptoms in pregnancy > 20 weeks
+      
+      Closes #45
+      ```
+      
+      ```
+      medical(medication): add NSAIDs + ACE-I interaction check
+      
+      BREAKING: medication_specialist now blocks NSAIDs prescription
+      when patient is on ACE inhibitors without explicit override.
+      
+      Safety: Prevents renal impairment in at-risk patients
+      ```
+      
+      OUTPUT FORMAT:
+      Return ONLY the commit message, nothing else.
+      If multiple logical changes, suggest splitting into separate commits.
+
+  suggest-split:
+    name: "✂️ Suggest Commit Split"
+    droid: code-reviewer-evo
+    priority: low
+    condition: |
+      staged_files.count > 5 || 
+      staged_files.any(f => f.path.includes('agents/')) && 
+      staged_files.any(f => f.path.includes('frontend/'))
+    prompt: |
+      These changes might be better as separate commits:
+      
+      ANALYZE staged files and suggest logical groupings:
+      
+      Example output:
+      ```
+      SUGGESTION: Split into 3 commits:
+      
+      1. medical(safety): update red flag thresholds
+         Files: backend/app/agents/specialists/safety.py
+      
+      2. feat(frontend): add severity indicator colors
+         Files: frontend/components/InsightCard.tsx
+                frontend/types.ts
+      
+      3. test(safety): add pre-eclampsia detection tests
+         Files: tests/test_safety_agent.py
+      ```
+      
+      Only suggest if it makes logical sense. Small related changes
+      can stay together.

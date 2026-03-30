@@ -1,0 +1,145 @@
+# MedScribe AI - Smart Commit (All-in-One)
+# One command to analyze, validate, and commit
+# Use: droid smart-commit or droid sc
+
+name: Smart Commit
+description: Intelligent commit with automatic message generation
+
+trigger:
+  - command: "droid smart-commit"
+  - command: "droid sc"
+
+jobs:
+  # ═══════════════════════════════════════════════════════════════
+  # STEP 1: Pre-flight checks (fast, blocking)
+  # ═══════════════════════════════════════════════════════════════
+  
+  preflight:
+    name: "🚀 Pre-flight Checks"
+    timeout: 10s
+    parallel: true
+    steps:
+      - name: secrets-scan
+        run: |
+          # Quick regex scan for secrets
+          if git diff --cached | grep -iE "(api_key|secret|password|token).*=.*['\"][a-zA-Z0-9]{20,}"; then
+            echo "❌ BLOCKED: Potential secret detected"
+            exit 1
+          fi
+          echo "✅ No secrets found"
+      
+      - name: phi-scan
+        run: |
+          # Quick PHI pattern scan
+          if git diff --cached | grep -iE "(\d{3}\.\d{3}\.\d{3}-\d{2}|paciente:.*[A-Z][a-z]+)"; then
+            echo "⚠️ WARNING: Potential PHI detected - review carefully"
+          fi
+          echo "✅ PHI check complete"
+      
+      - name: lint-check
+        run: |
+          # Run linters on staged files
+          git diff --cached --name-only --diff-filter=d | grep "\.py$" | xargs -r ruff check --fix
+          git diff --cached --name-only --diff-filter=d | grep "\.tsx?$" | xargs -r npx eslint --fix
+          echo "✅ Lint check complete"
+
+  # ═══════════════════════════════════════════════════════════════
+  # STEP 2: AI Analysis
+  # ═══════════════════════════════════════════════════════════════
+  
+  ai-analysis:
+    name: "🤖 AI Analysis"
+    droid: code-reviewer-evo
+    depends_on: preflight
+    timeout: 30s
+    prompt: |
+      Quick analysis of staged changes for commit message:
+      
+      1. Identify the PRIMARY change type:
+         - feat / fix / docs / refactor / test / chore / medical
+      
+      2. Identify the scope (most affected area):
+         - coordinator / safety / diagnostic / medication / api / frontend
+      
+      3. Summarize in ONE line (max 50 chars):
+         - Use imperative mood
+         - Be specific
+      
+      4. Flag if MEDICAL REVIEW needed:
+         - Changes to agents/*.py
+         - Changes to prompts
+         - Changes to safety logic
+      
+      OUTPUT (JSON):
+      ```json
+      {
+        "type": "feat",
+        "scope": "diagnostic",
+        "summary": "add probability tracking for hypotheses",
+        "medical_review": false,
+        "breaking": false,
+        "body": "Optional longer description"
+      }
+      ```
+
+  # ═══════════════════════════════════════════════════════════════
+  # STEP 3: Generate & Confirm
+  # ═══════════════════════════════════════════════════════════════
+  
+  generate-commit:
+    name: "📝 Generate Commit"
+    depends_on: ai-analysis
+    steps:
+      - name: build-message
+        run: |
+          # Build message from AI analysis
+          TYPE="{{ ai_analysis.type }}"
+          SCOPE="{{ ai_analysis.scope }}"
+          SUMMARY="{{ ai_analysis.summary }}"
+          BODY="{{ ai_analysis.body }}"
+          
+          MESSAGE="${TYPE}(${SCOPE}): ${SUMMARY}"
+          
+          if [ -n "$BODY" ]; then
+            MESSAGE="${MESSAGE}\n\n${BODY}"
+          fi
+          
+          echo "$MESSAGE"
+      
+      - name: confirm
+        interactive: true
+        prompt: |
+          Generated commit message:
+          
+          ```
+          {{ message }}
+          ```
+          
+          Options:
+          [Y] Commit with this message
+          [E] Edit message
+          [S] Show diff
+          [A] Abort
+          
+          Choice:
+
+  # ═══════════════════════════════════════════════════════════════
+  # STEP 4: Execute Commit
+  # ═══════════════════════════════════════════════════════════════
+  
+  execute:
+    name: "✅ Execute Commit"
+    depends_on: generate-commit
+    condition: "user_choice == 'Y'"
+    run: |
+      git commit -m "{{ final_message }}"
+      
+      echo "═══════════════════════════════════════════"
+      echo "✅ COMMITTED SUCCESSFULLY"
+      echo "═══════════════════════════════════════════"
+      echo ""
+      echo "{{ final_message }}"
+      echo ""
+      echo "Next steps:"
+      echo "  git push origin {{ branch }}"
+      echo "  droid pr  # Create PR with AI description"

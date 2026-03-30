@@ -1,0 +1,106 @@
+# MedScribe AI - Safety Gate Workflow
+# Runs on every PR to ensure medical safety compliance
+# Priority: CRITICAL - Must pass before any merge
+
+name: PR Safety Gate
+description: Security and safety checks for medical AI code
+
+trigger:
+  - pull_request
+
+jobs:
+  security-scan:
+    name: Security Audit
+    droid: security-auditor
+    priority: critical
+    paths:
+      - backend/app/agents/**
+      - backend/app/agents/specialists/**
+      - backend/app/agents/tools/**
+    prompt: |
+      Scan for security vulnerabilities in this medical AI system:
+      
+      1. PHI/PII EXPOSURE:
+         - Check prompts for hardcoded patient data
+         - Verify no medical records in logs
+         - Ensure API responses don't leak sensitive data
+      
+      2. LGPD/HIPAA COMPLIANCE:
+         - Data retention policies
+         - Consent mechanisms
+         - Audit trail for medical decisions
+      
+      3. INJECTION RISKS:
+         - Prompt injection in clinical inputs
+         - SQL injection in database queries
+         - Command injection in tools
+      
+      4. API SECURITY:
+         - FDA/RxNorm API key exposure
+         - Rate limiting on medical endpoints
+         - Authentication on sensitive routes
+      
+      Focus files:
+      - backend/app/agents/coordinator.py (orchestration logic)
+      - backend/app/agents/tools/clinical_tools.py (data handling)
+      - backend/app/agents/tools/drug_api_tools.py (external APIs)
+      - backend/app/api/endpoints/*.py (API routes)
+
+  medical-prompt-audit:
+    name: Medical Prompt Safety
+    droid: medical-prompt-auditor
+    priority: critical
+    depends_on: security-scan
+    paths:
+      - backend/app/agents/**
+    prompt: |
+      Audit all medical AI prompts for safety issues:
+      
+      CHECKLIST:
+      - [ ] Red flag detection is FIRST priority in coordinator
+      - [ ] Safety agent handles: pre-eclampsia, ACS, stroke, sepsis
+      - [ ] Critic validation is MANDATORY for all insights
+      - [ ] Fallback behavior defined for API failures
+      - [ ] Portuguese language consistency maintained
+      - [ ] Severity levels correctly assigned (critical/high/moderate/low)
+      - [ ] No hallucination triggers in prompts
+      
+      CRITICAL FILES:
+      - safety.py: Must detect ALL emergency conditions
+      - diagnostic.py: Bayesian reasoning must be sound
+      - medication.py: Drug interactions must use verified data
+      - critic.py: Must validate ALL insights before saving
+
+  test-coverage:
+    name: Safety Test Generation
+    droid: test-writer-evo
+    priority: high
+    depends_on: medical-prompt-audit
+    paths:
+      - backend/app/agents/**
+    prompt: |
+      Generate critical safety tests for MedScribe AI:
+      
+      MUST TEST:
+      1. Pre-eclampsia detection (gestante + PA alta + cefaleia)
+      2. Chest pain red flags (ACS pathway)
+      3. Stroke FAST criteria
+      4. Drug interaction detection (NSAIDs + ACE-I, anticoagulants)
+      5. Critic rejection propagation
+      6. FDA API timeout fallback
+      
+      TEST PATTERNS:
+      ```python
+      def test_safety_agent_detects_preeclampsia():
+          input = "Gestante 32 semanas, PA 150/95, cefaleia"
+          result = safety_agent.process(input)
+          assert result.severity == "critical"
+          assert "pre-eclampsia" in result.content.lower()
+      
+      def test_critic_rejection_blocks_insight():
+          with mock.patch('critic.validate', return_value="REJECTED"):
+              with pytest.raises(ToolError):
+                  await save_clinical_insight(...)
+      ```
+      
+      Save tests to: tests/test_medical_safety.py

@@ -1,0 +1,95 @@
+# MedScribe AI - Documentation Workflow
+# Generates and updates documentation
+# Priority: LOW - Runs on significant changes or manually
+
+name: Documentation
+description: Generate and maintain project documentation
+
+trigger:
+  - manual
+  - release
+
+jobs:
+  documentation:
+    name: Documentation Generation
+    droid: documentation-writer-evo
+    priority: low
+    prompt: |
+      Generate/update documentation for MedScribe AI:
+      
+      DOCUMENTATION STRUCTURE:
+      
+      1. README.md (Root)
+         - Project overview
+         - Quick start guide
+         - Architecture diagram
+         - Tech stack summary
+      
+      2. docs/ARCHITECTURE.md
+         - Multi-agent system design
+         - Agent hierarchy and delegation
+         - Data flow diagrams
+         - State management
+      
+      3. docs/AGENTS.md
+         - Detailed description of each agent:
+           * clinical_coordinator
+           * safety_specialist
+           * diagnostic_specialist
+           * medication_specialist
+           * labs_vitals_specialist
+           * nutrition_specialist
+           * protocol_specialist
+           * history_taker
+           * empathy_critic
+           * critic
+         - Input/output formats
+         - Tools available to each
+         - Examples
+      
+      4. docs/API.md
+         - All endpoints documented
+         - Request/response examples
+         - Authentication
+         - Rate limits
+         - Error codes
+      
+      5. docs/DEPLOYMENT.md
+         - Environment setup
+         - Docker configuration
+         - Database migrations
+         - Environment variables
+      
+      6. docs/SAFETY.md (CRITICAL)
+         - Medical AI safety guidelines
+         - Red flag detection system
+         - Critic validation process
+         - LGPD/HIPAA compliance
+         - Audit logging
+      
+      7. docs/CONTRIBUTING.md
+         - Development workflow
+         - Code style guide
+         - Testing requirements
+         - PR process
+      
+      DIAGRAM GENERATION:
+      Use Mermaid for:
+      - Agent delegation flow
+      - Data pipeline
+      - API architecture
+      - Database schema
+      
+      Example:
+      ```mermaid
+      graph TD
+          A[Transcription Input] --> B[Coordinator]
+          B --> C{Red Flags?}
+          C -->|Yes| D[Safety Agent]
+          C -->|No| E[Diagnostic Agent]
+          D --> F[Critic Validation]
+          E --> F
+          F --> G[Save Insight]
+      ```
+      
+      LANGUAGE: Portuguese (Brazil) for user-facing docs

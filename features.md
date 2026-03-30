@@ -47,32 +47,32 @@
 ## Feature 9: Next.js Project Scaffold & Layout
 - Description: [Epic 3: Core Dashboard, Story 3.1] As a developer, I want to create the Next.js project with the dashboard layout (sidebar, header, session selector, content area). Source: _bmad-output/planning-artifacts/web-dashboard-epics.md
 - Dependencies: Feature 8
-- Status: pending
+- Status: done
 
 ## Feature 10: Session Selector & WebSocket Connection
 - Description: [Epic 3: Core Dashboard, Story 3.2] As a dashboard user, I want to select a session from a dropdown and connect via WebSocket, so that the dashboard shows live data for my session. Source: _bmad-output/planning-artifacts/web-dashboard-epics.md
 - Dependencies: Feature 9
-- Status: pending
+- Status: done
 
 ## Feature 11: Agent Cards Grid
 - Description: [Epic 3: Core Dashboard, Story 3.3] As a dashboard user, I want to see all agents as responsive cards showing name, type icon, model, status badge (pulsing when working), tokens, cost, uptime, and last task preview. Source: _bmad-output/planning-artifacts/web-dashboard-epics.md
 - Dependencies: Feature 10
-- Status: pending
+- Status: done
 
 ## Feature 12: Shared Context Live Feed
 - Description: [Epic 3: Core Dashboard, Story 3.4] As a dashboard user, I want to see a live feed of shared context entries with key, value, timestamp, and relative time, updating in real time via WebSocket. Source: _bmad-output/planning-artifacts/web-dashboard-epics.md
 - Dependencies: Feature 11
-- Status: pending
+- Status: done
 
 ## Feature 13: Task Queue Table
 - Description: [Epic 3: Core Dashboard, Story 3.5] As a dashboard user, I want to see the task queue with status badges (queued/active/completed/failed/timed_out), from→to, content preview, and cost. Source: _bmad-output/planning-artifacts/web-dashboard-epics.md
 - Dependencies: Feature 12
-- Status: pending
+- Status: done
 
 ## Feature 14: Send Task Modal
 - Description: [Epic 3: Core Dashboard, Story 3.6] As a dashboard user, I want to click Send Task on an agent card, type a prompt in a modal, and have it delivered to the agent via POST /api/tasks. Source: _bmad-output/planning-artifacts/web-dashboard-epics.md
 - Dependencies: Feature 13
-- Status: pending
+- Status: done
 
 ## Feature 15: Pane Output Streaming Endpoint
 - Description: [Epic 4: Terminal Embed, Story 4.1] As a developer, I want a backend endpoint GET /api/pane-output that returns last N lines of raw ANSI output and streams live via WebSocket pane_output events. Source: _bmad-output/planning-artifacts/web-dashboard-epics.md

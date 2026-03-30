@@ -1,0 +1,74 @@
+# MedScribe AI - Pre-Commit Safety Check
+# Runs BEFORE commit is finalized
+# Prevents unsafe code from entering the repository
+
+name: Pre-Commit Safety
+description: Quick safety checks before commit
+
+trigger:
+  - pre-commit
+
+timeout: 30s  # Must be fast!
+
+jobs:
+  secrets-scan:
+    name: "🔐 Secrets Detection"
+    droid: security-auditor
+    priority: critical
+    fail_fast: true
+    prompt: |
+      QUICK SCAN for secrets in staged files:
+      
+      BLOCK COMMIT if found:
+      - API keys (GOOGLE_API_KEY, OPENAI_API_KEY, etc.)
+      - Database credentials
+      - JWT secrets
+      - Private keys
+      - .env file contents
+      - Hardcoded passwords
+      
+      PATTERNS TO DETECT:
+      ```regex
+      (api[_-]?key|apikey|secret|password|token|credential)[\s]*[=:][\s]*["']?[a-zA-Z0-9_\-]{20,}
+      ```
+      
+      Return: PASS or BLOCK with file:line
+
+  phi-check:
+    name: "🏥 PHI Detection"
+    droid: security-auditor
+    priority: critical
+    fail_fast: true
+    prompt: |
+      QUICK SCAN for PHI (Protected Health Information):
+      
+      BLOCK COMMIT if found:
+      - Patient names (look for "paciente:", "patient:")
+      - CPF numbers (XXX.XXX.XXX-XX)
+      - Medical record numbers
+      - Phone numbers in clinical context
+      - Email addresses in clinical context
+      - Dates of birth with names
+      - Any real patient data in test files
+      
+      EXCEPTION: Mock data clearly marked as fake
+      
+      Return: PASS or BLOCK with details
+
+  medical-change-warning:
+    name: "⚠️ Medical Code Warning"
+    priority: medium
+    condition: |
+      staged_files.any(f => f.path.includes('agents/'))
+    prompt: |
+      WARNING: You are committing changes to medical AI agents.
+      
+      Staged medical files:
+      {{ staged_files | filter: 'agents/' }}
+      
+      REMINDER:
+      - These changes affect patient safety
+      - Ensure tests cover new behavior
+      - PR will require medical team review
+      
+      Proceed with commit? (This is a warning, not a block)
