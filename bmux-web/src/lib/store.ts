@@ -88,9 +88,18 @@ export const useBmuxStore = create<BmuxStore>((set, get) => ({
     const state = get();
 
     switch (event.type) {
-      case 'agent_spawned':
-        set({ agents: [event.agent, ...state.agents] });
+      case 'agent_spawned': {
+        // Upsert: update if agent exists (WS reconnect), add if new
+        const existing = state.agents.findIndex((a) => a.id === event.agent.id);
+        if (existing >= 0) {
+          const updated = [...state.agents];
+          updated[existing] = event.agent;
+          set({ agents: updated });
+        } else {
+          set({ agents: [event.agent, ...state.agents] });
+        }
         break;
+      }
 
       case 'agent_killed':
         set({
@@ -117,15 +126,24 @@ export const useBmuxStore = create<BmuxStore>((set, get) => ({
         break;
 
       case 'context_updated': {
-        const newEntries = [event.entry, ...state.contextEntries];
-        // Keep max 100 entries
-        set({ contextEntries: newEntries.slice(0, 100) });
+        // Upsert by key — avoid duplicates on WS reconnect
+        const filtered = state.contextEntries.filter((e) => e.key !== event.entry.key);
+        set({ contextEntries: [event.entry, ...filtered].slice(0, 100) });
         break;
       }
 
-      case 'task_created':
-        set({ tasks: [event.task, ...state.tasks] });
+      case 'task_created': {
+        // Upsert by id — avoid duplicates on WS reconnect
+        const existingTask = state.tasks.findIndex((t) => t.id === event.task.id);
+        if (existingTask >= 0) {
+          const updated = [...state.tasks];
+          updated[existingTask] = event.task;
+          set({ tasks: updated });
+        } else {
+          set({ tasks: [event.task, ...state.tasks] });
+        }
         break;
+      }
 
       case 'task_updated':
         set({

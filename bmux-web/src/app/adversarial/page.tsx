@@ -36,7 +36,7 @@ export default function AdversarialPage() {
           generator_model: generatorModel,
           evaluator_model: evaluatorModel,
           prompt,
-          multi_sprint: multiSprint,
+          // multi_sprint: multiSprint, // v1.0 — not yet implemented in backend
         }),
       })
     } catch {
@@ -113,13 +113,13 @@ export default function AdversarialPage() {
             <input
               type="checkbox"
               id="multi-sprint"
-              className="h-4 w-4 rounded border-border"
+              className="h-4 w-4 rounded border-border opacity-50"
               checked={multiSprint}
               onChange={(e) => setMultiSprint(e.target.checked)}
-              disabled={!!isRunning}
+              disabled={true}
             />
-            <label htmlFor="multi-sprint" className="text-sm text-foreground cursor-pointer">
-              Multi-Sprint Mode
+            <label htmlFor="multi-sprint" className="text-sm text-muted-foreground cursor-not-allowed">
+              Multi-Sprint Mode <span className="text-xs text-amber-500">(v1.0 — coming soon)</span>
             </label>
             {multiSprint && (
               <span className="text-xs text-muted-foreground">— a Planner agent will expand your prompt into 3–6 sprints</span>
