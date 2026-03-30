@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { Agent, ContextEntry, Task, Session, Metrics, BmuxEvent, AdversarialState } from './types';
+import type { Agent, ContextEntry, Task, Session, Metrics, BmuxEvent, AdversarialState, AdversarialModel } from './types';
 
 interface BmuxStore {
   // Session
@@ -28,8 +28,15 @@ interface BmuxStore {
   metrics: Metrics | null;
   setMetrics: (m: Metrics) => void;
 
-  // WebSocket event handler
-  handleEvent: (event: BmuxEvent) => void;
+  // Adversarial
+  adversarialRunning: boolean;
+  setAdversarialRunning: (v: boolean) => void;  generatorModel: AdversarialModel;
+  adversarialOn: boolean;
+  setAdversarialOn: (v: boolean) => void;  evaluatorModel: AdversarialModel;
+  setGeneratorModel: (m: AdversarialModel) => void;
+  setEvaluatorModel: (m: AdversarialModel) => void;  // WebSocket event handler
+  adversarialPrompt: string;
+  setAdversarialPrompt: (p: string) => void;  handleEvent: (event: BmuxEvent) => void;
 
   // Adversarial
   adversarial: AdversarialState | null;
@@ -69,9 +76,14 @@ export const useBmuxStore = create<BmuxStore>((set, get) => ({
 
   // Adversarial
   adversarial: null,
-  setAdversarial: (state) => set({ adversarial: state }),
-
-  // WebSocket event handler
+  adversarialRunning: false,  setAdversarial: (state) => set({ adversarial: state }),
+  setAdversarialRunning: (v) => set({ adversarialRunning: v }),  generatorModel: "claude-sonnet-4-20250514",
+  adversarialOn: false,
+  setAdversarialOn: (v) => set({ adversarialOn: v }),  evaluatorModel: "claude-opus-4-20250514",
+  setGeneratorModel: (m) => set({ generatorModel: m }),
+  setEvaluatorModel: (m) => set({ evaluatorModel: m }),
+  adversarialPrompt: "",
+  setAdversarialPrompt: (p) => set({ adversarialPrompt: p }),  // WebSocket event handler
   handleEvent: (event) => {
     const state = get();
 
@@ -128,6 +140,7 @@ export const useBmuxStore = create<BmuxStore>((set, get) => ({
         break;
 
       case 'adversarial_started': {
+        set({ adversarialRunning: true });
         set({
           adversarial: {
             phase: 'negotiating',

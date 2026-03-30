@@ -168,10 +168,3 @@ export interface AdversarialStartRequest {
   prompt: string;
 }
 
-export interface AdversarialState {
-  isOn: boolean;
-  isRunning: boolean;
-  generatorModel: AdversarialModel;
-  evaluatorModel: AdversarialModel;
-  prompt: string;
-}
