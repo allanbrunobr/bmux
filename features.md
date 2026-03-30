@@ -7,17 +7,17 @@
 ## Feature 1: Adversarial Mode Toggle
 - Description: [Epic 1: Dashboard Controls, Story 1.1] As a dashboard user, I want to toggle Adversarial Mode on/off from the dashboard header, so that I can switch between normal agent management and adversarial development. Source: _bmad-output/planning-artifacts/adversarial-mode-epics.md
 - Dependencies: none
-- Status: pending
+- Status: done
 
 ## Feature 2: Model Selector for Generator & Evaluator
 - Description: [Epic 1: Dashboard Controls, Story 1.2] As a dashboard user, I want to select different models for Generator (e.g. Sonnet) and Evaluator (e.g. Opus), so that I can balance speed vs rigor. Source: _bmad-output/planning-artifacts/adversarial-mode-epics.md
 - Dependencies: Feature 1
-- Status: pending
+- Status: done
 
 ## Feature 3: Adversarial Prompt Input & Start
 - Description: [Epic 1: Dashboard Controls, Story 1.3] As a dashboard user, I want to type a task prompt and click Start to trigger the adversarial loop via POST /api/adversarial/start. Source: _bmad-output/planning-artifacts/adversarial-mode-epics.md
 - Dependencies: Feature 2
-- Status: pending
+- Status: done
 
 ## Feature 4: Spawn Generator & Evaluator Agents
 - Description: [Epic 2: Backend Harness, Story 2.1] As the daemon, I want to spawn two Claude agents with different models and isolated contexts when adversarial mode starts. Source: _bmad-output/planning-artifacts/adversarial-mode-epics.md
