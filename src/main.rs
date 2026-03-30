@@ -93,6 +93,17 @@ enum Commands {
         #[command(subcommand)]
         action: DataCommands,
     },
+
+    // ── Web dashboard (Epic 1 + 2) ─────────────────────────────────────────
+    /// Open the BMUX web dashboard in a browser
+    Web {
+        /// Port to open (default: 7432)
+        #[arg(long, default_value_t = 7432)]
+        port: u16,
+        /// Start without opening a browser window
+        #[arg(long)]
+        no_open: bool,
+    },
 }
 
 // ── Agent subcommands ─────────────────────────────────────────────────────────
@@ -254,6 +265,7 @@ async fn main() -> Result<()> {
         Some(Commands::Workflow { session, action }) => cmd_workflow(session.as_deref(), action).await,
         Some(Commands::Config { action }) => cmd_config(action),
         Some(Commands::Data { action }) => cmd_data(action),
+        Some(Commands::Web { port, no_open }) => cmd_web(port, no_open),
     }
 }
 
@@ -510,6 +522,33 @@ fn cmd_data(action: DataCommands) -> Result<()> {
             Ok(())
         }
     }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Web command (Story 1.4)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+fn cmd_web(port: u16, no_open: bool) -> Result<()> {
+    let url = format!("http://localhost:{port}");
+    println!("BMUX web dashboard: {url}");
+    if !no_open {
+        open_browser(&url);
+    }
+    Ok(())
+}
+
+/// Open a URL in the default browser, platform-aware.
+fn open_browser(url: &str) {
+    #[cfg(target_os = "macos")]
+    let _ = std::process::Command::new("open").arg(url).spawn();
+
+    #[cfg(target_os = "linux")]
+    let _ = std::process::Command::new("xdg-open").arg(url).spawn();
+
+    #[cfg(target_os = "windows")]
+    let _ = std::process::Command::new("cmd")
+        .args(["/c", "start", url])
+        .spawn();
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════

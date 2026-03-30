@@ -7,42 +7,42 @@
 ## Feature 1: Axum Server Scaffold & Sessions Endpoint
 - Description: [Epic 1: Backend HTTP API, Story 1.1] As a developer, I want to start an Axum HTTP server inside the BMUX daemon on port 7432, so that external HTTP clients can query session state. Source: _bmad-output/planning-artifacts/web-dashboard-epics.md
 - Dependencies: none
-- Status: pending
+- Status: done
 
 ## Feature 2: Agents Endpoint
 - Description: [Epic 1: Backend HTTP API, Story 1.2] As a dashboard user, I want to fetch all agents in a session via HTTP, so that the frontend can render agent cards. Source: _bmad-output/planning-artifacts/web-dashboard-epics.md
 - Dependencies: Feature 1
-- Status: pending
+- Status: done
 
 ## Feature 3: Context & Tasks Endpoints
 - Description: [Epic 1: Backend HTTP API, Story 1.3] As a dashboard user, I want to fetch shared context and task queue via HTTP, so that the frontend can display the context feed and task table. Source: _bmad-output/planning-artifacts/web-dashboard-epics.md
 - Dependencies: Feature 2
-- Status: pending
+- Status: done
 
 ## Feature 4: Static File Serving & bmux web CLI Command
 - Description: [Epic 1: Backend HTTP API, Story 1.4] As a user, I want to run bmux web and have the dashboard open in my browser, so that I can monitor agents without configuring anything. Source: _bmad-output/planning-artifacts/web-dashboard-epics.md
 - Dependencies: Feature 3
-- Status: pending
+- Status: done
 
 ## Feature 5: POST Endpoint — Send Task from Browser
 - Description: [Epic 1: Backend HTTP API, Story 1.5] As a dashboard user, I want to send a task to an agent from the browser UI via POST /api/tasks. Source: _bmad-output/planning-artifacts/web-dashboard-epics.md
 - Dependencies: Feature 4
-- Status: pending
+- Status: done
 
 ## Feature 6: WebSocket Endpoint & Event Broadcaster
 - Description: [Epic 2: WebSocket Events, Story 2.1] As a dashboard user, I want to receive real-time updates via WebSocket, so that the dashboard reflects terminal state instantly. Source: _bmad-output/planning-artifacts/web-dashboard-epics.md
 - Dependencies: Feature 5
-- Status: pending
+- Status: done
 
 ## Feature 7: BmuxEvent Enum & Emission Points
 - Description: [Epic 2: WebSocket Events, Story 2.2] As a developer, I want every state mutation in the daemon to emit a typed event, so that WebSocket clients receive all state changes. Source: _bmad-output/planning-artifacts/web-dashboard-epics.md
 - Dependencies: Feature 6
-- Status: pending
+- Status: done
 
 ## Feature 8: Client Reconnection & Multi-Client Support
 - Description: [Epic 2: WebSocket Events, Story 2.3] As a dashboard user, I want multiple browser tabs to receive updates simultaneously and auto-reconnect on disconnect. Source: _bmad-output/planning-artifacts/web-dashboard-epics.md
 - Dependencies: Feature 7
-- Status: pending
+- Status: done
 
 ## Feature 9: Next.js Project Scaffold & Layout
 - Description: [Epic 3: Core Dashboard, Story 3.1] As a developer, I want to create the Next.js project with the dashboard layout (sidebar, header, session selector, content area). Source: _bmad-output/planning-artifacts/web-dashboard-epics.md

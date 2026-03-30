@@ -23,6 +23,7 @@ use crate::config::settings::BmuxConfig;
 use crate::orchestration::message_bus::MessageBus;
 use crate::orchestration::task_router::{self, TaskRouter};
 use crate::storage::context_store::ContextStore;
+use crate::web::events::BmuxEvent;
 
 use super::{
     keybindings::Action,
@@ -33,15 +34,16 @@ use super::{
     session::{Session, SessionMeta, meta_path, socket_path},
 };
 
-/// Shared daemon state accessible from all client handlers.
-struct DaemonState {
-    session: Mutex<Session>,
-    agents: Mutex<AgentRegistry>,
-
-    context: ContextStore,
-    task_router: TaskRouter,
-    session_name: String,
-    ipc_socket_path: PathBuf,
+/// Shared daemon state accessible from all client handlers and the web server.
+pub(crate) struct DaemonState {
+    pub session: Mutex<Session>,
+    pub agents: Mutex<AgentRegistry>,
+    pub context: ContextStore,
+    pub task_router: TaskRouter,
+    pub session_name: String,
+    pub ipc_socket_path: PathBuf,
+    /// Broadcast channel for WebSocket event push (Story 2.1).
+    pub web_events_tx: broadcast::Sender<Arc<BmuxEvent>>,
 }
 
 pub struct DaemonServer {
@@ -65,6 +67,7 @@ impl DaemonServer {
         let bus = Arc::new(MessageBus::new(name)?);
         let ipc_socket_path = bus.socket_path().clone();
         let task_router = TaskRouter::new(bus, 300);
+        let (web_events_tx, _) = broadcast::channel::<Arc<BmuxEvent>>(256);
 
         Ok(Self {
             name: name.to_string(),
@@ -75,6 +78,7 @@ impl DaemonServer {
                 task_router,
                 session_name: name.to_string(),
                 ipc_socket_path,
+                web_events_tx,
             }),
             socket_path: socket_path(name),
             meta_path: meta_path(name),
@@ -91,6 +95,17 @@ impl DaemonServer {
 
         let (tx, _) = broadcast::channel::<Arc<ServerMessage>>(32);
         let tx = Arc::new(tx);
+
+        // Spawn Axum web server (Story 1.1)
+        {
+            let state_clone = Arc::clone(&self.state);
+            let events_tx = self.state.web_events_tx.clone();
+            tokio::spawn(async move {
+                if let Err(e) = crate::web::start_web_server(state_clone, 7432, events_tx).await {
+                    tracing::warn!("Web server error: {e}");
+                }
+            });
+        }
 
         // Background task: broadcast PTY output at ~60fps
         {
@@ -452,6 +467,15 @@ async fn handle_client_message(
                 idle_since: Some(std::time::Instant::now()),
             }).await;
 
+            // Emit AgentSpawned event (Story 2.2)
+            let _ = state.web_events_tx.send(Arc::new(BmuxEvent::AgentSpawned {
+                session: state.session_name.clone(),
+                agent_name: name.clone(),
+                agent_type: agent_type.clone(),
+                pane_id,
+                timestamp: chrono::Utc::now(),
+            }));
+
             let data = format!(
                 "Agent '{}' spawned successfully (pane: {} [{}])\n\
                  Pane ID: {}\n\
@@ -518,6 +542,12 @@ async fn handle_client_message(
             let data = match reg.remove(&name) {
                 Ok(info) => {
                     state.task_router.handle_agent_crash(&name).await;
+                    // Emit AgentKilled event (Story 2.2)
+                    let _ = state.web_events_tx.send(Arc::new(BmuxEvent::AgentKilled {
+                        session: state.session_name.clone(),
+                        agent_name: info.name.clone(),
+                        timestamp: chrono::Utc::now(),
+                    }));
                     format!("Agent '{}' ({}) killed.", info.name, info.agent_type)
                 }
                 Err(e) => format!("Error: {}", e),
@@ -573,6 +603,17 @@ async fn handle_client_message(
                 }
             }
 
+            // Emit TaskDispatched event (Story 2.2)
+            if let Some(ref agent_name) = agent {
+                let _ = state.web_events_tx.send(Arc::new(BmuxEvent::TaskDispatched {
+                    session: state.session_name.clone(),
+                    task_id: data.split("task_id: ").nth(1).unwrap_or("").trim_end_matches(')').to_string(),
+                    agent: agent_name.clone(),
+                    content: String::new(),
+                    timestamp: chrono::Utc::now(),
+                }));
+            }
+
             return Ok(HandleResult::Reply(ServerMessage::QueryResult { data }));
         }
 
@@ -623,7 +664,16 @@ async fn handle_client_message(
 
         ClientMessage::ContextSet { key, value } => {
             let data = match state.context.set(&key, &value, None) {
-                Ok(()) => format!("Set '{}'.", key),
+                Ok(()) => {
+                    // Emit ContextUpdated event (Story 2.2)
+                    let _ = state.web_events_tx.send(Arc::new(BmuxEvent::ContextUpdated {
+                        session: state.session_name.clone(),
+                        key: key.clone(),
+                        value: value.clone(),
+                        timestamp: chrono::Utc::now(),
+                    }));
+                    format!("Set '{}'.", key)
+                }
                 Err(e) => format!("Error: {}", e),
             };
             return Ok(HandleResult::Reply(ServerMessage::QueryResult { data }));
