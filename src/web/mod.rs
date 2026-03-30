@@ -19,8 +19,9 @@ use tower_http::{
 use crate::tui::server::DaemonState;
 use events::BmuxEvent;
 use routes::{
-    AppState, get_agents, get_audit, get_context, get_metrics, get_pane_output, get_sessions,
-    get_tasks, get_ws, post_task,
+    AppState, get_adversarial_history, get_adversarial_status, get_agents, get_audit, get_context,
+    get_metrics, get_pane_output, get_sessions, get_tasks, get_ws, post_adversarial_start,
+    post_adversarial_stop, post_task,
 };
 
 /// Start the Axum HTTP + WebSocket server.
@@ -72,6 +73,17 @@ pub async fn start_web_server(
         .route("/api/metrics", get(get_metrics))
         .route("/api/pane-output", get(get_pane_output))
         .route("/api/audit", get(get_audit))
+        // Adversarial harness (Stories 2.1–2.5)
+        .route(
+            "/api/adversarial/start",
+            axum::routing::post(post_adversarial_start),
+        )
+        .route(
+            "/api/adversarial/stop",
+            axum::routing::post(post_adversarial_stop),
+        )
+        .route("/api/adversarial/status", get(get_adversarial_status))
+        .route("/api/adversarial/history", get(get_adversarial_history))
         // WebSocket
         .route("/ws", get(get_ws))
         // Static files (Next.js build) — served from /

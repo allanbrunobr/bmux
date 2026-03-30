@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 
 use axum::{
     Json,
@@ -10,6 +11,7 @@ use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast;
 
+use crate::adversarial::types::AdversarialConfig;
 use crate::tui::server::DaemonState;
 use crate::web::events::BmuxEvent;
 use crate::web::websocket::ws_handler;
@@ -527,4 +529,122 @@ pub async fn get_audit(
     }
 
     Json(entries).into_response()
+}
+
+// ── Story 2.5: Adversarial REST endpoints ────────────────────────────────────
+
+/// Request body for POST /api/adversarial/start
+#[derive(Deserialize)]
+pub struct AdversarialStartBody {
+    pub prompt: String,
+    pub generator_model: String,
+    pub evaluator_model: String,
+    pub max_retries: Option<u32>,
+}
+
+/// POST /api/adversarial/start — spawn harness as background task, return immediately.
+pub async fn post_adversarial_start(
+    State(state): State<AppState>,
+    Json(body): Json<AdversarialStartBody>,
+) -> Response {
+    let config = AdversarialConfig {
+        prompt: body.prompt,
+        generator_model: body.generator_model,
+        evaluator_model: body.evaluator_model,
+        max_retries: body.max_retries.unwrap_or(3),
+    };
+
+    // Reset stop flag so a fresh run can proceed
+    state
+        .daemon
+        .adversarial_stop
+        .store(false, Ordering::SeqCst);
+
+    // Persist initial config to context store
+    let _ = state
+        .daemon
+        .context
+        .set("adversarial:status", "spawning", None);
+    if let Ok(cfg_json) = serde_json::to_string(&config) {
+        let _ = state.daemon.context.set("adversarial:config", &cfg_json, None);
+    }
+
+    // Spawn harness as non-blocking background task (Story 2.3 AC)
+    let daemon_arc = Arc::clone(&state.daemon);
+    let events_tx = state.events_tx.clone();
+    let stop = Arc::clone(&state.daemon.adversarial_stop);
+    tokio::spawn(async move {
+        crate::adversarial::harness::run(daemon_arc, events_tx, config, stop).await;
+    });
+
+    Json(serde_json::json!({"status": "started"})).into_response()
+}
+
+/// POST /api/adversarial/stop — signal the running harness to stop.
+pub async fn post_adversarial_stop(State(state): State<AppState>) -> Response {
+    state
+        .daemon
+        .adversarial_stop
+        .store(true, Ordering::SeqCst);
+    let _ = state.daemon.context.set("adversarial:status", "stopped", None);
+    Json(serde_json::json!({"status": "stopping"})).into_response()
+}
+
+/// GET /api/adversarial/status?session=X — return current state from context.
+pub async fn get_adversarial_status(
+    State(state): State<AppState>,
+    Query(params): Query<SessionParam>,
+) -> Response {
+    if let Err(e) = require_session(params.session.as_deref(), &state.daemon.session_name) {
+        return e;
+    }
+
+    let ctx = &state.daemon.context;
+    let status = ctx.get("adversarial:status").ok().flatten().unwrap_or_else(|| "idle".to_string());
+    let contract = ctx.get("adversarial:contract").ok().flatten();
+    let attempt = ctx.get("adversarial:attempt").ok().flatten();
+    let config = ctx.get("adversarial:config").ok().flatten();
+
+    Json(serde_json::json!({
+        "status": status,
+        "contract": contract.and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok()),
+        "attempt": attempt.and_then(|s| s.parse::<u32>().ok()),
+        "config": config.and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok()),
+    }))
+    .into_response()
+}
+
+/// GET /api/adversarial/history?session=X — all scores and feedback runs.
+pub async fn get_adversarial_history(
+    State(state): State<AppState>,
+    Query(params): Query<SessionParam>,
+) -> Response {
+    if let Err(e) = require_session(params.session.as_deref(), &state.daemon.session_name) {
+        return e;
+    }
+
+    let ctx = &state.daemon.context;
+    let scores = ctx
+        .get("adversarial:scores")
+        .ok()
+        .flatten()
+        .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok());
+    let feedback = ctx
+        .get("adversarial:feedback")
+        .ok()
+        .flatten()
+        .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok());
+    let attempt = ctx
+        .get("adversarial:attempt")
+        .ok()
+        .flatten()
+        .and_then(|s| s.parse::<u32>().ok())
+        .unwrap_or(0);
+
+    Json(serde_json::json!({
+        "attempt": attempt,
+        "scores": scores,
+        "feedback": feedback,
+    }))
+    .into_response()
 }
