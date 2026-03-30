@@ -1,6 +1,14 @@
 export type AgentStatus = 'idle' | 'working' | 'error';
-export type AgentType = 'claude' | 'tool' | 'custom' | 'pie' | 'plugin';
+export type AgentType = 'claude-code' | 'opencode' | 'pi' | 'gemini' | 'shell' | 'custom';
 export type TaskStatus = 'queued' | 'active' | 'completed' | 'failed' | 'timed_out';
+
+export interface AgentLocation {
+  type: 'local' | 'remote';
+  provider?: string;
+  region?: string;
+  lat?: number;
+  lon?: number;
+}
 
 export interface Agent {
   id: string;
@@ -13,6 +21,9 @@ export interface Agent {
   uptime_seconds: number;
   last_task?: string;
   spawned_at: string;
+  pane_id?: number;
+  pid?: number;
+  location?: AgentLocation;
 }
 
 export interface ContextEntry {
@@ -56,4 +67,36 @@ export type BmuxEvent =
   | { type: 'context_updated'; entry: ContextEntry }
   | { type: 'task_created'; task: Task }
   | { type: 'task_updated'; task: Task }
-  | { type: 'metrics_updated'; metrics: Metrics };
+  | { type: 'metrics_updated'; metrics: Metrics }
+  | { type: 'pane_output'; pane_id: number; data: string }
+  | { type: 'audit_event'; entry: AuditEntry };
+
+export interface AuditEntry {
+  id: string;
+  timestamp: string;
+  event_type: string;
+  agent_id?: string;
+  session_id: string;
+  metadata: Record<string, string>;
+  lgpd_compliant: boolean;
+}
+
+export interface ConsultationCost {
+  consultation_id: string;
+  agents: { name: string; role: string; tokens: number; cost_usd: number }[];
+  total_cost_usd: number;
+  transcription_cost_usd: number;
+  soap_note_cost_usd: number;
+  date: string;
+  timestamp: string;
+  [key: string]: unknown;
+}
+
+export interface TokenDataPoint {
+  timestamp: string;
+  agent: string;
+  tokens_per_minute: number;
+  cumulative_tokens: number;
+  cumulative_cost_usd: number;
+  [key: string]: unknown;
+}

@@ -73,11 +73,11 @@ function agentToCoords(agent: Agent): [number, number] {
   if (agent.location.region && REGION_COORDS[agent.location.region]) {
     return REGION_COORDS[agent.location.region]
   }
-  return [agent.location.lon, agent.location.lat]
+  return [agent.location.lon ?? 0, agent.location.lat ?? 0]
 }
 
 function agentColor(agent: Agent): [number, number, number] {
-  return PROVIDER_COLORS[agent.provider] ?? [100, 100, 100]
+  return PROVIDER_COLORS[agent.location?.provider ?? ''] ?? [100, 100, 100]
 }
 
 // ── Component ──────────────────────────────────────────────────────────────────
@@ -93,16 +93,16 @@ export function AgentMap({ session }: Props) {
   const handleEvent = useCallback((event: BmuxEvent) => {
     switch (event.type) {
       case 'agent_spawned':
-        setAgents((prev) => [...prev.filter((a) => a.name !== event.agent.name), event.agent])
+        setAgents((prev) => event.type === 'agent_spawned' ? [...prev, event.agent] : prev)
         break
-      case 'agent_updated':
-        setAgents((prev) => prev.map((a) => a.name === event.agent.name ? event.agent : a))
+      case 'agent_tokens_updated':
+        setAgents((prev) => prev.map((a) => a.name === event.agent_id ? { ...a, tokens_used: event.tokens, cost_usd: event.cost_usd } : a))
         break
-      case 'agent_stopped':
-        setAgents((prev) => prev.filter((a) => a.name !== event.name))
+      case 'agent_killed':
+        setAgents((prev) => prev.filter((a) => a.name !== event.agent_id))
         break
-      case 'task_queued':
-      case 'task_started': {
+      case 'task_created':
+      case 'task_updated': {
         // Draw an arc from source agent to target agent
         const task = event.task as Task
         const src = agents.find((a) => a.name === task.from_agent)

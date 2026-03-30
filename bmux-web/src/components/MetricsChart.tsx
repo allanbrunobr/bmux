@@ -49,7 +49,7 @@ function fmtTokens(v: number) {
 export function MetricsChart({ session }: Props) {
   const [dataPoints, setDataPoints] = useState<TokenDataPoint[]>(MOCK_METRICS)
   const [agentNames, setAgentNames] = useState<string[]>(
-    Array.from(new Set(MOCK_METRICS.map((d) => d.agent)))
+    ['arquiteto', 'testador'] as string[]
   )
 
   // Accumulate per-agent cost deltas from WebSocket events
@@ -57,21 +57,21 @@ export function MetricsChart({ session }: Props) {
     if (event.type !== 'agent_tokens_updated') return
     const now = Date.now()
     setDataPoints((prev) => {
-      const last = prev.filter((d) => d.agent === event.name).at(-1)
+      const last = prev.filter((d) => d.agent === event.agent_id).at(-1)
       const newPoint: TokenDataPoint = {
-        timestamp:          now,
-        agent:              event.name,
-        tokens_per_minute:  event.tokens_delta,
-        cumulative_tokens:  (last?.cumulative_tokens ?? 0) + event.tokens_delta,
-        cumulative_cost_usd: (last?.cumulative_cost_usd ?? 0) + event.cost_delta_usd,
+        timestamp:          new Date(now).toISOString(),
+        agent:              event.agent_id,
+        tokens_per_minute:  event.tokens,
+        cumulative_tokens:  (Number(last?.cumulative_tokens) || 0) + event.tokens,
+        cumulative_cost_usd: (Number(last?.cumulative_cost_usd) || 0) + event.cost_usd,
       }
       // Keep last 120 data points per agent
-      const pruned = prev.filter((d) => d.agent !== event.name).concat(
-        [...prev.filter((d) => d.agent === event.name), newPoint].slice(-120)
+      const pruned = prev.filter((d) => d.agent !== event.agent_id).concat(
+        [...prev.filter((d) => d.agent === event.agent_id), newPoint].slice(-120)
       )
       return pruned
     })
-    setAgentNames((prev) => prev.includes(event.name) ? prev : [...prev, event.name])
+    setAgentNames((prev) => prev.includes(event.agent_id) ? prev : [...prev, event.agent_id])
   }, [])
 
   useBmuxSocket(session, handleEvent)
@@ -81,7 +81,7 @@ export function MetricsChart({ session }: Props) {
   const timestamps = Array.from(new Set(dataPoints.map((d) => d.timestamp))).sort()
 
   const tpmRows = timestamps.map((ts) => {
-    const row: Record<string, number> = { ts }
+    const row: Record<string, number | string> = { ts }
     for (const name of agentNames) {
       const pt = dataPoints.find((d) => d.timestamp === ts && d.agent === name)
       row[name] = pt?.tokens_per_minute ?? 0
@@ -90,17 +90,17 @@ export function MetricsChart({ session }: Props) {
   })
 
   const costRows = timestamps.map((ts) => {
-    const row: Record<string, number> = { ts, total: 0 }
+    const row: Record<string, number | string> = { ts, total: 0 }
     for (const name of agentNames) {
       const pt = dataPoints.find((d) => d.timestamp === ts && d.agent === name)
       row[name] = pt?.cumulative_cost_usd ?? 0
-      row['total'] += row[name]
+      row['total'] = (Number(row['total']) || 0) + (Number(row[name]) || 0)
     }
     return row
   })
 
   // ── Summary totals ──────────────────────────────────────────────────────────
-  const totalTokens = MOCK_AGENTS.reduce((s, a) => s + a.tokens_total, 0)
+  const totalTokens = MOCK_AGENTS.reduce((s, a) => s + a.tokens_used, 0)
   const totalCost   = MOCK_AGENTS.reduce((s, a) => s + a.cost_usd, 0)
   const activeAgents = MOCK_AGENTS.filter((a) => a.status === 'working').length
   const completedTasks = MOCK_TASKS.filter((t) => t.status === 'completed').length

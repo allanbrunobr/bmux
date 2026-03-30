@@ -35,42 +35,34 @@ export function CostBreakdown({ session }: Props) {
 
   const handleEvent = useCallback((event: BmuxEvent) => {
     switch (event.type) {
-      case 'agent_updated':
       case 'agent_spawned':
-        setAgents((prev) => {
-          const idx = prev.findIndex((a) => a.name === event.agent.name)
-          if (idx >= 0) {
-            const next = [...prev]
-            next[idx] = event.agent
-            return next
-          }
-          return [...prev, event.agent]
-        })
+        setAgents((prev) => [...prev, event.agent])
         break
       case 'agent_tokens_updated':
         setAgents((prev) =>
-          prev.map((a) =>
-            a.name === event.name
-              ? { ...a, tokens_total: a.tokens_total + event.tokens_delta, cost_usd: a.cost_usd + event.cost_delta_usd }
-              : a
+          prev.map((a) => a.name === event.agent_id
+            ? { ...a, tokens_used: event.tokens, cost_usd: event.cost_usd }
+            : a
           )
         )
         break
+      case 'agent_killed':
+        setAgents((prev) => prev.filter((a) => a.name !== event.agent_id))
+        break
     }
   }, [])
-
   useBmuxSocket(session, handleEvent)
 
   // Derived totals
   const sessionTotal = agents.reduce((s, a) => s + a.cost_usd, 0)
-  const sessionHours = agents.reduce((s, a) => s + a.uptime_secs / 3600, 0) / agents.length || 1
+  const sessionHours = agents.reduce((s, a) => s + a.uptime_seconds / 3600, 0) / agents.length || 1
   const costPerHour  = sessionTotal / sessionHours
   const projectedDay   = costPerHour * 24
   const projectedMonth = projectedDay * 30
 
   // Per-agent cost/hour
   const agentRows = agents.map((a) => {
-    const hours = a.uptime_secs / 3600 || 0.001
+    const hours = a.uptime_seconds / 3600 || 0.001
     return { ...a, cost_per_hour: a.cost_usd / hours }
   })
 
@@ -117,7 +109,7 @@ export function CostBreakdown({ session }: Props) {
                     </div>
                   </td>
                   <td className="px-4 py-2 text-[#8b949e] font-mono text-xs">{a.model}</td>
-                  <td className="px-4 py-2 text-right font-mono">{fmtTokens(a.tokens_total)}</td>
+                  <td className="px-4 py-2 text-right font-mono">{fmtTokens(a.tokens_used)}</td>
                   <td className="px-4 py-2 text-right font-mono text-[#3fb950]">{fmtCost(a.cost_usd)}</td>
                   <td className="px-4 py-2 text-right font-mono text-[#d29922]">{fmtCost(a.cost_per_hour)}</td>
                 </tr>

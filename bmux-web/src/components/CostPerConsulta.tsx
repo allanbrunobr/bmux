@@ -58,8 +58,10 @@ function applyContextEntry(
     transcription_cost_usd: field === 'transcription_cost' ? value : 0,
     soap_note_cost_usd:     field === 'soap_note_cost'     ? value : 0,
     total_cost_usd:         value,
-    timestamp:              entry.updated_at,
-    agent:                  entry.updated_by ?? 'unknown',
+    timestamp:              entry.timestamp,
+    agent: entry.session ?? 'unknown',
+    agents: [],
+    date: new Date().toISOString().slice(0, 10),
   }
   return [...prev, newEntry]
 }

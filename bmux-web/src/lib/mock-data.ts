@@ -25,7 +25,7 @@ export function getMockAgents(): Agent[] {
     {
       id: 'agent-001',
       name: 'arquiteto',
-      agent_type: 'claude',
+      agent_type: 'claude-code',
       model: 'claude-sonnet-4-6',
       status: 'working',
       tokens_used: 42850,
@@ -37,7 +37,7 @@ export function getMockAgents(): Agent[] {
     {
       id: 'agent-002',
       name: 'testador',
-      agent_type: 'claude',
+      agent_type: 'claude-code',
       model: 'claude-haiku-3-5',
       status: 'idle',
       tokens_used: 18320,
@@ -49,7 +49,7 @@ export function getMockAgents(): Agent[] {
     {
       id: 'agent-003',
       name: 'infra-bot',
-      agent_type: 'tool',
+      agent_type: 'shell',
       model: 'claude-opus-4',
       status: 'error',
       tokens_used: 8100,
@@ -73,7 +73,7 @@ export function getMockAgents(): Agent[] {
     {
       id: 'agent-005',
       name: 'pie-runner',
-      agent_type: 'pie',
+      agent_type: 'pi',
       model: 'claude-haiku-3-5',
       status: 'working',
       tokens_used: 5200,

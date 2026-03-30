@@ -15,7 +15,7 @@ import type { BmuxEvent } from '@/lib/types'
 
 interface Props {
   session: string
-  paneId: string
+  paneId: number
   agentName: string
   onClose: () => void
 }
@@ -59,7 +59,7 @@ export function AgentTerminal({ session, paneId, agentName, onClose }: Props) {
 
     // Load historical lines
     try {
-      const { lines } = await api.getPaneOutput(session, paneId, 100)
+      const { lines } = await api.getPaneOutput(session, String(paneId), 100)
       for (const line of lines) {
         term.writeln(line)
       }

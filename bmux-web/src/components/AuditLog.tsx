@@ -45,7 +45,7 @@ function entriesToCsv(entries: AuditEntry[]): string {
   const header = 'id,timestamp,event_type,agent,session,lgpd_compliant,metadata'
   const rows = entries.map((e) =>
     [
-      e.id, e.timestamp, e.event_type, e.agent, e.session,
+      e.id, e.timestamp, e.event_type, e.agent_id, e.session_id,
       e.lgpd_compliant === null ? 'unknown' : String(e.lgpd_compliant),
       `"${JSON.stringify(e.metadata).replace(/"/g, '""')}"`,
     ].join(',')
@@ -68,14 +68,14 @@ export function AuditLog({ session }: Props) {
   useBmuxSocket(session, handleEvent)
 
   // Unique filter options
-  const agentOptions = useMemo(() => Array.from(new Set(entries.map((e) => e.agent))), [entries])
+  const agentOptions = useMemo(() => Array.from(new Set(entries.map((e) => e.agent_id))), [entries])
   const typeOptions  = useMemo(() => Array.from(new Set(entries.map((e) => e.event_type))), [entries])
 
   // Apply filters
   const filtered = useMemo(() => {
     const cutoff = Date.now() - TIME_RANGE_MS[timeRange]
     return entries.filter((e) => {
-      if (filterAgent && e.agent !== filterAgent) return false
+      if (filterAgent && e.agent_id !== filterAgent) return false
       if (filterType  && e.event_type !== filterType) return false
       if (new Date(e.timestamp).getTime() < cutoff) return false
       return true
@@ -163,8 +163,8 @@ export function AuditLog({ session }: Props) {
                   <td className="px-4 py-2">
                     <span className="font-mono text-xs text-[#bc8cff]">{entry.event_type}</span>
                   </td>
-                  <td className="px-4 py-2 font-mono text-xs text-[#58a6ff]">{entry.agent}</td>
-                  <td className="px-4 py-2 font-mono text-xs text-[#8b949e]">{entry.session}</td>
+                  <td className="px-4 py-2 font-mono text-xs text-[#58a6ff]">{entry.agent_id}</td>
+                  <td className="px-4 py-2 font-mono text-xs text-[#8b949e]">{entry.session_id}</td>
                   <td className="px-4 py-2 max-w-xs truncate">
                     <span className="font-mono text-xs text-[#8b949e]" title={JSON.stringify(entry.metadata)}>
                       {Object.entries(entry.metadata).map(([k, v]) => `${k}=${v}`).join(' ')}

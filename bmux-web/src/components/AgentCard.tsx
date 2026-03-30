@@ -9,22 +9,24 @@ import { cn } from '@/lib/utils'
 
 function getAgentTypeIcon(type: AgentType): string {
   switch (type) {
-    case 'claude': return 'Claude'
-    case 'tool': return 'Tool'
-    case 'custom': return 'Custom'
-    case 'pie': return 'Pie'
-    case 'plugin': return 'Plugin'
-    default: return 'Agent'
+    case 'claude-code': return '🤖'
+    case 'opencode': return '✨'
+    case 'pi': return '🥧'
+    case 'gemini': return '✨'
+    case 'shell': return '🔧'
+    case 'custom': return '🔌'
+    default: return '🤖'
   }
 }
 
 function getAgentTypeEmoji(type: AgentType): string {
   switch (type) {
-    case 'claude': return '\u{1F916}' // robot
-    case 'tool': return '\u{1F527}' // wrench
-    case 'custom': return '\u{2728}' // sparkles
-    case 'pie': return '\u{1F967}' // pie
-    case 'plugin': return '\u{1F50C}' // plug
+    case 'claude-code': return '\u{1F916}' // 🤖
+    case 'opencode': return '\u{2728}' // ✨
+    case 'pi': return '\u{1F967}' // 🥧
+    case 'gemini': return '\u{2728}' // ✨
+    case 'shell': return '\u{1F527}' // 🔧
+    case 'custom': return '\u{1F50C}' // 🔌
     default: return '\u{1F916}'
   }
 }
