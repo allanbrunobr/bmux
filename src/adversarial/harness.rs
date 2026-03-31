@@ -545,7 +545,12 @@ async fn build_evaluate_loop(
                 .scores
                 .iter()
                 .map(|s| {
-                    serde_json::json!({"name": s.name, "score": s.score, "threshold": s.threshold})
+                    serde_json::json!({
+                        "criterion": s.name,
+                        "score": s.score,
+                        "threshold": s.threshold,
+                        "passed": s.score >= s.threshold
+                    })
                 })
                 .collect(),
             passed: eval_result.passed,

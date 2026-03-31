@@ -25,19 +25,27 @@ pub struct AdversarialConfig {
     pub generator_model: String,
     pub evaluator_model: String,
     pub max_retries: u32,
+    /// Pass threshold for evaluation criteria (default: 7 out of 10).
+    #[serde(default = "default_threshold")]
+    pub threshold: u32,
     /// PRD content provided by the user; when present a Planner agent
     /// breaks it into structured sprints before the build/evaluate loop.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub prd_content: Option<String>,
 }
 
+fn default_threshold() -> u32 {
+    7
+}
+
 impl Default for AdversarialConfig {
     fn default() -> Self {
         Self {
             prompt: String::new(),
-            generator_model: "claude-opus-4-5".to_string(),
-            evaluator_model: "claude-sonnet-4-5".to_string(),
+            generator_model: "claude-sonnet-4-20250514".to_string(),
+            evaluator_model: "claude-opus-4-20250514".to_string(),
             max_retries: 3,
+            threshold: 7,
             prd_content: None,
         }
     }

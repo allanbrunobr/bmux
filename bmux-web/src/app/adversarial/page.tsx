@@ -36,8 +36,8 @@ export default function AdversarialPage() {
           session: activeSession,
           generator_model: generatorModel,
           evaluator_model: evaluatorModel,
-          prompt,
-          // multi_sprint: multiSprint, // v1.0 — not yet implemented in backend
+          prd_content: prompt, // v2: PRD content triggers Planner → sprints flow
+          prompt: prompt,      // fallback for single-sprint mode
         }),
       })
     } catch {
