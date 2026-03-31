@@ -44,19 +44,8 @@ impl Default for AdversarialConfig {
 }
 
 /// A single sprint produced by the Planner agent.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PlannedSprint {
-    pub number: u32,
-    pub title: String,
-    pub features: Vec<String>,
-    pub criteria: Vec<Criterion>,
-}
 
 /// Full sprint plan output by the Planner agent.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SprintPlan {
-    pub sprints: Vec<PlannedSprint>,
-}
 
 /// Current phase of the adversarial harness.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -136,3 +125,6 @@ pub struct EvaluationResult {
     #[serde(rename = "overallSummary", alias = "overall_summary")]
     pub overall_summary: String,
 }
+
+/// Alias for backward compatibility.
+pub type PlannedSprint = SprintSpec;
