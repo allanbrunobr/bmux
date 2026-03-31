@@ -1,6 +1,7 @@
 "use client"
 
 import { AdversarialStatus } from '@/components/AdversarialStatus'
+import { AdversarialTerminals } from '@/components/AdversarialTerminals'
 import { ScoreBoard } from '@/components/ScoreBoard'
 import { SprintTimeline } from '@/components/SprintTimeline'
 import { useBmuxStore } from '@/lib/store'
@@ -154,6 +155,9 @@ export default function AdversarialPage() {
         <ScoreBoard scores={adversarial.scores} history={adversarial.history} threshold={adversarial.config?.threshold ?? 7} />
       )}
 
+      {/* Live agent terminals */}
+      <AdversarialTerminals />
+
       {/* Sprint timeline (multi-sprint) */}
       {adversarial && adversarial.totalSprints > 1 && (
         <SprintTimeline
@@ -162,6 +166,7 @@ export default function AdversarialPage() {
           phase={adversarial.phase}
           history={adversarial.history}
           threshold={adversarial.config?.threshold ?? 7}
+          sprintPlan={adversarial.sprintPlan}
         />
       )}
     </div>

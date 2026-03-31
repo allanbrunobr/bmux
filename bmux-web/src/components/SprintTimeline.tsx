@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { ScoreBoard } from '@/components/ScoreBoard'
-import type { AdversarialPhase, SprintAttempt } from '@/lib/types'
+import type { AdversarialPhase, SprintAttempt, SprintPlan } from '@/lib/types'
 
 interface SprintTimelineProps {
   currentSprint: number
@@ -11,6 +11,7 @@ interface SprintTimelineProps {
   phase: AdversarialPhase
   history: SprintAttempt[]
   threshold: number
+  sprintPlan?: SprintPlan
 }
 
 type SprintStatus = 'passed' | 'failed' | 'building' | 'evaluating' | 'pending'
@@ -54,10 +55,15 @@ export function SprintTimeline({
   phase,
   history,
   threshold,
+  sprintPlan,
 }: SprintTimelineProps) {
   const [expandedSprint, setExpandedSprint] = useState<number | null>(null)
 
   const sprints = Array.from({ length: totalSprints }, (_, i) => i + 1)
+
+  function getSprintTitle(sprintNum: number): string | null {
+    return sprintPlan?.sprints.find((s) => s.number === sprintNum)?.title ?? null
+  }
 
   function getAttemptCount(sprintNum: number): number {
     return history.filter((h) => h.sprint === sprintNum).length
@@ -88,6 +94,8 @@ export function SprintTimeline({
             const isExpanded = expandedSprint === sprintNum
             const isLast = idx === sprints.length - 1
 
+            const title = getSprintTitle(sprintNum)
+
             return (
               <div key={sprintNum} className="flex items-center">
                 {/* Sprint node */}
@@ -100,6 +108,9 @@ export function SprintTimeline({
                 >
                   <span className="text-xl leading-none">{config.emoji}</span>
                   <span className="text-xs font-medium text-foreground">Sprint {sprintNum}</span>
+                  {title && (
+                    <span className="text-[10px] text-muted-foreground text-center leading-tight max-w-[72px] truncate" title={title}>{title}</span>
+                  )}
                   <span className="text-[10px] text-muted-foreground">{config.label}</span>
                   {attemptCount > 0 && (
                     <span className="text-[10px] text-muted-foreground">{attemptCount} attempt{attemptCount !== 1 ? 's' : ''}</span>

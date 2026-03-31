@@ -169,6 +169,7 @@ export const useBmuxStore = create<BmuxStore>((set, get) => ({
             scores: [],
             history: [],
             config: event.config,
+            sprintPlan: event.sprint_plan,
           },
         });
         break;

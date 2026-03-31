@@ -91,6 +91,23 @@ export interface AdversarialConfig {
   max_retries: number;
 }
 
+export interface SprintCriterion {
+  name: string;
+  description: string;
+  threshold: number;
+}
+
+export interface SprintSpec {
+  number: number;
+  title: string;
+  features: string[];
+  criteria: SprintCriterion[];
+}
+
+export interface SprintPlan {
+  sprints: SprintSpec[];
+}
+
 export interface AdversarialState {
   phase: AdversarialPhase;
   sprint: number;
@@ -100,6 +117,7 @@ export interface AdversarialState {
   scores: EvaluationScore[];
   history: SprintAttempt[];
   config: AdversarialConfig | null;
+  sprintPlan?: SprintPlan;
 }
 
 export type BmuxEvent =
@@ -113,7 +131,7 @@ export type BmuxEvent =
   | { type: 'metrics_updated'; metrics: Metrics }
   | { type: 'pane_output'; pane_id: number; data: string }
   | { type: 'audit_event'; entry: AuditEntry }
-  | { type: 'adversarial_started'; config: AdversarialConfig; total_sprints?: number }
+  | { type: 'adversarial_started'; config: AdversarialConfig; total_sprints?: number; sprint_plan?: SprintPlan }
   | { type: 'adversarial_negotiating'; contract_proposal: Record<string, unknown> }
   | { type: 'adversarial_building'; sprint: number; attempt: number }
   | { type: 'adversarial_evaluating'; sprint: number }
