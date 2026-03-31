@@ -6,7 +6,7 @@
 
 use serde_json::Value;
 
-use crate::adversarial::types::{Criterion, CriterionScore, EvaluationResult, SprintContract};
+use crate::adversarial::types::{Criterion, CriterionScore, EvaluationResult, SprintContract, SprintPlan, SprintSpec};
 
 // ── Public extraction API ─────────────────────────────────────────────────────
 
@@ -123,6 +123,80 @@ pub fn parse_evaluation(text: &str) -> EvaluationResult {
         .to_string();
 
     EvaluationResult { passed, scores, feedback, overall_summary }
+}
+
+/// Parse a SprintPlan from Planner output or raw context JSON.
+///
+/// Expected shape: `{ "sprints": [{ "number", "title", "features", "criteria" }] }`
+/// Returns None if text contains no valid plan.
+pub fn parse_sprint_plan(text: &str) -> Option<SprintPlan> {
+    let val = extract_json(text)?;
+
+    // Try direct deserialization first
+    if let Ok(plan) = serde_json::from_value::<SprintPlan>(val.clone()) {
+        if !plan.sprints.is_empty() {
+            return Some(plan);
+        }
+    }
+
+    // Manual extraction: accept both "sprints" array and top-level array
+    let sprints_val = val.get("sprints").cloned().unwrap_or(val.clone());
+    let arr = sprints_val.as_array()?;
+
+    let sprints: Vec<SprintSpec> = arr
+        .iter()
+        .enumerate()
+        .filter_map(|(i, s)| {
+            let number = s
+                .get("number")
+                .and_then(|v| v.as_u64())
+                .unwrap_or((i + 1) as u64) as u32;
+            let title = s
+                .get("title")
+                .and_then(|v| v.as_str())
+                .unwrap_or("Sprint")
+                .to_string();
+            let features: Vec<String> = s
+                .get("features")
+                .and_then(|v| v.as_array())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                        .collect()
+                })
+                .unwrap_or_default();
+            let criteria: Vec<crate::adversarial::types::Criterion> = s
+                .get("criteria")
+                .and_then(|v| v.as_array())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|c| {
+                            let name = c.get("name")?.as_str()?.to_string();
+                            let description = c
+                                .get("description")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("criterion")
+                                .to_string();
+                            let threshold =
+                                c.get("threshold").and_then(|v| v.as_f64()).unwrap_or(7.0);
+                            Some(crate::adversarial::types::Criterion {
+                                name,
+                                description,
+                                threshold,
+                            })
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            Some(SprintSpec { number, title, features, criteria })
+        })
+        .collect();
+
+    if sprints.is_empty() {
+        None
+    } else {
+        Some(SprintPlan { sprints })
+    }
 }
 
 /// Check if the evaluator approved the contract without revision.

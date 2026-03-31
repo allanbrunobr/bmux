@@ -1,14 +1,14 @@
 /// Adversarial harness — GAN-inspired generator ↔ evaluator loop.
 ///
-/// Implements Stories 2.1–2.4:
-/// - 2.1  Spawn generator and evaluator agents in TUI panes
-/// - 2.2  Contract negotiation phase
-/// - 2.3  Build → Evaluate → Feedback → Retry loop
-/// - 2.4  Persist all state in the context store
+/// Stories 2.1–2.3 (adversarial v2):
+/// - 2.1  Multi-sprint loop: iterate through all sprints from adversarial:sprint_plan
+/// - 2.2  Evaluator with real tools: prompt instructs cargo test / curl / grep for security
+/// - 2.3  Git commits per feature: Generator commits after each feature and fix
 ///
-/// Each phase writes its state to context keys:
+/// Context keys written:
 ///   adversarial:status   — current phase string
 ///   adversarial:config   — JSON AdversarialConfig
+///   adversarial:sprint   — current sprint number (u32)
 ///   adversarial:contract — JSON SprintContract
 ///   adversarial:attempt  — current attempt number (u32)
 ///   adversarial:scores   — JSON Vec<CriterionScore>
@@ -21,9 +21,9 @@ use std::time::{Duration, Instant};
 use anyhow::Result;
 use tokio::sync::broadcast;
 
-use crate::adversarial::parser::{is_approved, parse_contract, parse_evaluation};
+use crate::adversarial::parser::{is_approved, parse_contract, parse_evaluation, parse_sprint_plan};
 use crate::adversarial::types::{
-    AdversarialConfig, AdversarialStatus, EvaluationResult, SprintContract,
+    AdversarialConfig, AdversarialStatus, EvaluationResult, SprintContract, SprintSpec,
 };
 use crate::agents::adapter::AgentConfig;
 use crate::tui::server::DaemonState;
@@ -49,8 +49,9 @@ fn done_file(session: &str, role: &str) -> String {
 
 /// Run the full adversarial harness as a background tokio task.
 ///
-/// Spawns generator + evaluator, negotiates a contract, then enters the
-/// build → evaluate → retry loop until PASSED, FAILED, or STOPPED.
+/// Spawns generator + evaluator, then iterates over each sprint from the
+/// Planner's sprint plan (or falls back to single sprint if no plan exists).
+/// Each sprint: negotiate contract → build → evaluate → retry.
 pub async fn run(
     state: Arc<DaemonState>,
     events_tx: broadcast::Sender<Arc<BmuxEvent>>,
@@ -68,73 +69,163 @@ async fn run_inner(
     config: AdversarialConfig,
     stop: Arc<AtomicBool>,
 ) -> Result<()> {
-    // Persist config and emit started event
+    let start_time = Instant::now();
+
+    // Persist config
     persist_status(&state, AdversarialStatus::Spawning);
     persist_str(&state, "adversarial:config", &serde_json::to_string(&config)?);
 
+    // ── Story 2.1: Load sprint plan from context ──────────────────────────────
+    // wt1's Planner sets adversarial:sprint_plan; fall back to single sprint
+    let sprints = load_sprint_plan(&state, &config);
+    let total_sprints = sprints.len() as u32;
+
     let _ = events_tx.send(Arc::new(BmuxEvent::AdversarialStarted {
         config: serde_json::to_value(&config).unwrap_or_default(),
-        total_sprints: Some(1),
+        total_sprints: Some(total_sprints),
     }));
 
-    // ── Story 2.1: Spawn agents ───────────────────────────────────────────────
-    let (gen_pane, eval_pane) =
-        spawn_agents(&state, &config, &events_tx).await?;
+    // ── Spawn agents (once for the whole run) ─────────────────────────────────
+    let (gen_pane, eval_pane) = spawn_agents(&state, &config, &events_tx).await?;
 
     check_stop(&stop, &state)?;
 
-    // ── Story 2.2: Contract negotiation ──────────────────────────────────────
-    persist_status(&state, AdversarialStatus::ContractNegotiation);
-    let _ = events_tx.send(Arc::new(BmuxEvent::AdversarialNegotiating {
-        contract_proposal: serde_json::Value::Null,
-    }));
+    // ── Story 2.1: Multi-sprint loop ──────────────────────────────────────────
+    let mut cumulative_context = String::new();
+    let mut sprints_passed: u32 = 0;
 
-    let contract = negotiate_contract(&state, &config, gen_pane, eval_pane, &stop).await?;
+    for sprint_spec in &sprints {
+        let sprint_num = sprint_spec.number;
 
-    // Persist agreed contract
-    persist_str(
-        &state,
-        "adversarial:contract",
-        &serde_json::to_string(&contract)?,
-    );
+        check_stop(&stop, &state)?;
 
-    check_stop(&stop, &state)?;
+        // Track current sprint in context
+        persist_str(&state, "adversarial:sprint", &sprint_num.to_string());
 
-    // ── Story 2.3: Build → evaluate loop ─────────────────────────────────────
-    let result =
-        build_evaluate_loop(&state, &config, &contract, gen_pane, eval_pane, &stop, &events_tx).await;
+        tracing::info!(sprint = sprint_num, total = total_sprints, "Starting sprint");
 
-    match result {
-        Ok(true) => {
-            persist_status(&state, AdversarialStatus::Passed);
-            let _ = events_tx.send(Arc::new(BmuxEvent::AdversarialSprintPassed {
-                sprint: 1,
-                total_attempts: config.max_retries,
-            }));
-            let _ = events_tx.send(Arc::new(BmuxEvent::AdversarialComplete {
-                sprints_passed: 1,
-                total_duration_ms: 0,
-            }));
-        }
-        Ok(false) => {
-            persist_status(&state, AdversarialStatus::Failed);
-            let _ = events_tx.send(Arc::new(BmuxEvent::AdversarialFailed {
-                sprint: 1,
-                reason: "Evaluation failed after max retries".to_string(),
-            }));
-        }
-        Err(e) if e.to_string().contains("Stopped") => {
-            persist_status(&state, AdversarialStatus::Stopped);
-        }
-        Err(e) => {
-            persist_status(&state, AdversarialStatus::Error(e.to_string()));
+        // ── Contract negotiation per sprint ───────────────────────────────────
+        persist_status(&state, AdversarialStatus::ContractNegotiation);
+        let _ = events_tx.send(Arc::new(BmuxEvent::AdversarialNegotiating {
+            contract_proposal: serde_json::Value::Null,
+        }));
+
+        let contract =
+            negotiate_contract(&state, &config, sprint_spec, gen_pane, eval_pane, &stop).await?;
+
+        persist_str(&state, "adversarial:contract", &serde_json::to_string(&contract)?);
+
+        check_stop(&stop, &state)?;
+
+        // ── Build → evaluate loop for this sprint ─────────────────────────────
+        let result = build_evaluate_loop(
+            &state,
+            &config,
+            &contract,
+            sprint_spec,
+            &cumulative_context,
+            gen_pane,
+            eval_pane,
+            &stop,
+            &events_tx,
+        )
+        .await;
+
+        match result {
+            Ok(true) => {
+                // Sprint passed — emit event, accumulate context, continue
+                let elapsed = start_time.elapsed().as_millis() as u64;
+                let _ = events_tx.send(Arc::new(BmuxEvent::AdversarialSprintPassed {
+                    sprint: sprint_num,
+                    total_attempts: config.max_retries,
+                }));
+
+                // Build cumulative context for next sprint's Generator
+                let features_summary = sprint_spec.features.join(", ");
+                if !cumulative_context.is_empty() {
+                    cumulative_context.push(' ');
+                }
+                cumulative_context.push_str(&format!(
+                    "Sprint {sprint_num} ({title}) implemented: {features_summary}.",
+                    title = sprint_spec.title,
+                ));
+
+                sprints_passed += 1;
+                tracing::info!(
+                    sprint = sprint_num,
+                    elapsed_ms = elapsed,
+                    "Sprint passed"
+                );
+            }
+            Ok(false) => {
+                // Sprint failed after max retries — stop entirely
+                persist_status(&state, AdversarialStatus::Failed);
+                let _ = events_tx.send(Arc::new(BmuxEvent::AdversarialFailed {
+                    sprint: sprint_num,
+                    reason: format!(
+                        "Sprint {sprint_num} failed after {} attempts",
+                        config.max_retries + 1
+                    ),
+                }));
+                tracing::warn!(sprint = sprint_num, "Sprint FAILED — stopping harness");
+                return Ok(());
+            }
+            Err(e) if e.to_string().contains("Stopped") => {
+                persist_status(&state, AdversarialStatus::Stopped);
+                return Ok(());
+            }
+            Err(e) => {
+                persist_status(&state, AdversarialStatus::Error(e.to_string()));
+                return Err(e);
+            }
         }
     }
+
+    // ── All sprints passed ────────────────────────────────────────────────────
+    persist_status(&state, AdversarialStatus::Passed);
+    let total_duration_ms = start_time.elapsed().as_millis() as u64;
+    let _ = events_tx.send(Arc::new(BmuxEvent::AdversarialComplete {
+        sprints_passed,
+        total_duration_ms,
+    }));
+
+    tracing::info!(
+        sprints_passed = sprints_passed,
+        duration_ms = total_duration_ms,
+        "All sprints passed — adversarial run complete"
+    );
 
     Ok(())
 }
 
-// ── Story 2.1: Agent spawning ─────────────────────────────────────────────────
+// ── Story 2.1: Load sprint plan ───────────────────────────────────────────────
+
+/// Load sprint plan from context (set by wt1's Planner).
+/// Falls back to a single sprint using config.prompt if no plan is found.
+fn load_sprint_plan(
+    state: &DaemonState,
+    config: &AdversarialConfig,
+) -> Vec<SprintSpec> {
+    if let Ok(Some(plan_json)) = state.context.get("adversarial:sprint_plan") {
+        if let Some(plan) = parse_sprint_plan(&plan_json) {
+            if !plan.sprints.is_empty() {
+                tracing::info!(count = plan.sprints.len(), "Loaded sprint plan from context");
+                return plan.sprints;
+            }
+        }
+    }
+
+    // Fallback: single sprint from config.prompt
+    tracing::info!("No sprint plan in context — using single-sprint fallback");
+    vec![SprintSpec {
+        number: 1,
+        title: "Sprint 1".to_string(),
+        features: vec![config.prompt.clone()],
+        criteria: vec![],
+    }]
+}
+
+// ── Agent spawning ────────────────────────────────────────────────────────────
 
 async fn spawn_agents(
     state: &DaemonState,
@@ -155,8 +246,6 @@ async fn spawn_agent(
     let name = format!("adversarial-{role}");
     let agent_type = format!("adversarial-{role}");
 
-    // Build env + shell command.  The shell stays interactive so the TUI pane
-    // remains alive across multiple prompt/response cycles.
     let cmd = format!(
         "export BMUX_SESSION='{}' BMUX_SOCKET='{}' BMUX_AGENT_NAME='{}' BMUX_ADV_ROLE='{}'; \
          exec bash --norc",
@@ -171,10 +260,8 @@ async fn spawn_agent(
         sess.split_and_run_command(&cmd)?
     };
 
-    // Allow the shell to start
     tokio::time::sleep(Duration::from_millis(800)).await;
 
-    // Register in AgentRegistry (role stored as agent_type)
     {
         let mut reg = state.agents.lock().await;
         reg.register(
@@ -192,7 +279,6 @@ async fn spawn_agent(
         }
     }
 
-    // Emit AgentSpawned event
     let _ = events_tx.send(Arc::new(BmuxEvent::AgentSpawned {
         agent: crate::web::routes::AgentInfo {
             id: name.clone(),
@@ -213,22 +299,35 @@ async fn spawn_agent(
     Ok(pane_id)
 }
 
-// ── Story 2.2: Contract negotiation ──────────────────────────────────────────
+// ── Story 2.1: Contract negotiation (sprint-specific) ────────────────────────
 
 async fn negotiate_contract(
     state: &DaemonState,
     config: &AdversarialConfig,
+    sprint_spec: &SprintSpec,
     gen_pane: usize,
     eval_pane: usize,
     stop: &AtomicBool,
 ) -> Result<SprintContract> {
-    // Generator proposes
+    let features_list = if sprint_spec.features.is_empty() {
+        config.prompt.clone()
+    } else {
+        sprint_spec.features.join("\n- ")
+    };
+
+    let criteria_hint = if sprint_spec.criteria.is_empty() {
+        String::new()
+    } else {
+        let names: Vec<&str> = sprint_spec.criteria.iter().map(|c| c.name.as_str()).collect();
+        format!("\n\nEnsure criteria include: {}", names.join(", "))
+    };
+
     let gen_prompt = format!(
-        "Propose a sprint contract for the following task:\n\n{}\n\n\
+        "Propose a sprint contract for Sprint {} — {}.\n\nFeatures to implement:\n- {}{}\n\n\
          Output ONLY valid JSON with this exact structure:\n\
          {{\"features\": [\"...\"], \"criteria\": [{{\"name\": \"...\", \
          \"description\": \"...\", \"threshold\": 7.0}}]}}",
-        config.prompt
+        sprint_spec.number, sprint_spec.title, features_list, criteria_hint
     );
 
     let gen_response = query_agent(
@@ -252,10 +351,11 @@ async fn negotiate_contract(
         let contract_json = serde_json::to_string_pretty(&contract)?;
         let eval_prompt = if round == 0 {
             format!(
-                "Review this sprint contract:\n\n{contract_json}\n\n\
+                "Review this sprint contract for Sprint {} — {}:\n\n{contract_json}\n\n\
                  If it is rigorous and complete, output exactly: APPROVED\n\
                  Otherwise output a tougher revised JSON contract \
-                 (same structure, stricter criteria/higher thresholds)."
+                 (same structure, stricter criteria/higher thresholds).",
+                sprint_spec.number, sprint_spec.title
             )
         } else {
             format!(
@@ -282,7 +382,6 @@ async fn negotiate_contract(
             break;
         }
 
-        // Evaluator proposed revisions — use the revised contract
         let revised = parse_contract(&eval_response);
         if !revised.criteria.is_empty() {
             contract = revised;
@@ -292,12 +391,14 @@ async fn negotiate_contract(
     Ok(contract)
 }
 
-// ── Story 2.3: Build → evaluate loop ─────────────────────────────────────────
+// ── Stories 2.1 + 2.2 + 2.3: Build → evaluate loop ──────────────────────────
 
 async fn build_evaluate_loop(
     state: &DaemonState,
     config: &AdversarialConfig,
     contract: &SprintContract,
+    sprint_spec: &SprintSpec,
+    cumulative_context: &str,
     gen_pane: usize,
     eval_pane: usize,
     stop: &AtomicBool,
@@ -305,30 +406,42 @@ async fn build_evaluate_loop(
 ) -> Result<bool> {
     let contract_json = serde_json::to_string_pretty(contract)?;
     let max_retries = config.max_retries;
+    let sprint_num = sprint_spec.number;
+
+    // Build context preamble for Generator (Story 2.1)
+    let context_preamble = if cumulative_context.is_empty() {
+        String::new()
+    } else {
+        format!("Previous sprints context:\n{cumulative_context}\n\n")
+    };
+
+    let features_list = sprint_spec.features.join("\n- ");
 
     for attempt in 0..=max_retries {
         check_stop(stop, state)?;
 
-        // Persist attempt counter
         persist_str(state, "adversarial:attempt", &attempt.to_string());
 
-        // ── Generator builds ──────────────────────────────────────────────────
+        // ── Generator builds (Stories 2.1 + 2.3) ─────────────────────────────
         persist_status(state, AdversarialStatus::Building);
         let _ = events_tx.send(Arc::new(BmuxEvent::AdversarialBuilding {
-            sprint: 1,
+            sprint: sprint_num,
             attempt: attempt + 1,
         }));
 
+        // Story 2.3: include git commit instructions; Story 2.1: include cumulative context
         let build_prompt = if attempt == 0 {
             format!(
-                "Sprint contract:\n{contract_json}\n\n\
-                 Task: {}\n\n\
-                 Implement all features. Commit your work after each feature. \
+                "{context_preamble}\
+                 Sprint {sprint_num} — {title}\n\
+                 Sprint contract:\n{contract_json}\n\n\
+                 Features to implement:\n- {features_list}\n\n\
+                 Implement all features. After completing each feature, run:\n\
+                 git add -A && git commit -m 'feat(sprint-{sprint_num}): <description>'\n\n\
                  Focus on meeting every criterion threshold.",
-                config.prompt
+                title = sprint_spec.title,
             )
         } else {
-            // Retry: include evaluator feedback
             let feedback_json = state
                 .context
                 .get("adversarial:feedback")
@@ -342,14 +455,17 @@ async fn build_evaluate_loop(
                 .flatten()
                 .unwrap_or_else(|| "[]".to_string());
 
+            // Story 2.3: use fix(sprint-N) commit message on retry
             format!(
-                "Sprint contract:\n{contract_json}\n\n\
-                 Task: {}\n\n\
+                "{context_preamble}\
+                 Sprint {sprint_num} — {title}\n\
+                 Sprint contract:\n{contract_json}\n\n\
                  Previous evaluation (attempt {attempt}):\n\
                  Scores: {scores_json}\n\
                  Feedback: {feedback_json}\n\n\
-                 Address ALL feedback and retry. Commit after each fix.",
-                config.prompt
+                 Address ALL feedback items. After each fix, run:\n\
+                 git add -A && git commit -m 'fix(sprint-{sprint_num}): <what was fixed>'",
+                title = sprint_spec.title,
             )
         };
 
@@ -366,20 +482,34 @@ async fn build_evaluate_loop(
 
         check_stop(stop, state)?;
 
-        // ── Evaluator scores ──────────────────────────────────────────────────
+        // ── Evaluator scores (Story 2.2: real tools) ──────────────────────────
         persist_status(state, AdversarialStatus::Evaluating);
         let _ = events_tx.send(Arc::new(BmuxEvent::AdversarialEvaluating {
-            sprint: 1,
+            sprint: sprint_num,
         }));
 
+        // Story 2.2: instruct Evaluator to RUN code, not just read it
         let eval_prompt = format!(
-            "Sprint contract:\n{contract_json}\n\n\
-             Evaluate the implementation against every criterion. \
+            "Sprint {sprint_num} — {title}\n\
+             Sprint contract:\n{contract_json}\n\n\
+             EVALUATION INSTRUCTIONS — you MUST execute, not just read:\n\
+             1. Run `cargo test` (or `npm test` for TypeScript). Report EXACT test names and \
+                error messages for any failures.\n\
+             2. Curl API endpoints relevant to this sprint. Report URL, expected response, \
+                actual response for any failures.\n\
+             3. Grep for security issues: `unwrap()` on user input, hardcoded secrets, missing \
+                auth checks, SQL injection patterns.\n\
+             4. For every issue found, include the FILE PATH and LINE NUMBER.\n\
+             5. CRITICAL: Kill any background processes (e.g. `kill %1`) BEFORE outputting \
+                your evaluation.\n\
+             6. The workspace is in the current directory. Use `cargo test` for Rust, \
+                `npm test` for TypeScript.\n\n\
              Score each criterion 1–10. Output ONLY valid JSON:\n\
              {{\"passed\": true/false, \
               \"scores\": [{{\"name\": \"...\", \"score\": 8.0, \"threshold\": 7.0}}], \
-              \"feedback\": [\"...\"], \
+              \"feedback\": [\"<file>:<line> — <issue>\"], \
               \"overallSummary\": \"...\"}}",
+            title = sprint_spec.title,
         );
 
         let eval_response = query_agent(
@@ -393,11 +523,10 @@ async fn build_evaluate_loop(
         )
         .await?;
 
-        tracing::debug!(attempt = attempt, response = %eval_response, "Evaluator result");
+        tracing::debug!(sprint = sprint_num, attempt = attempt, response = %eval_response, "Evaluator result");
 
         let eval_result: EvaluationResult = parse_evaluation(&eval_response);
 
-        // Persist scores + feedback (Story 2.4)
         persist_str(
             state,
             "adversarial:scores",
@@ -409,26 +538,29 @@ async fn build_evaluate_loop(
             &serde_json::to_string(&eval_result.feedback)?,
         );
 
-        // Emit scores event
         let _ = events_tx.send(Arc::new(BmuxEvent::AdversarialScores {
-            sprint: 1,
+            sprint: sprint_num,
             attempt: attempt + 1,
-            scores: eval_result.scores.iter()
-                .map(|s| serde_json::json!({"name": s.name, "score": s.score, "threshold": s.threshold}))
+            scores: eval_result
+                .scores
+                .iter()
+                .map(|s| {
+                    serde_json::json!({"name": s.name, "score": s.score, "threshold": s.threshold})
+                })
                 .collect(),
             passed: eval_result.passed,
         }));
 
-        // Check pass condition: all criteria >= threshold
-        let all_passed = eval_result.passed
-            || eval_result.scores.iter().all(|s| s.score >= s.threshold);
+        let all_passed =
+            eval_result.passed || eval_result.scores.iter().all(|s| s.score >= s.threshold);
 
         if all_passed {
-            tracing::info!(attempt = attempt, "Adversarial sprint PASSED");
+            tracing::info!(sprint = sprint_num, attempt = attempt, "Sprint PASSED");
             return Ok(true);
         }
 
         tracing::info!(
+            sprint = sprint_num,
             attempt = attempt,
             summary = %eval_result.overall_summary,
             "Criteria not met — will retry"
@@ -437,28 +569,23 @@ async fn build_evaluate_loop(
         if attempt < max_retries {
             persist_status(state, AdversarialStatus::Retrying);
             let _ = events_tx.send(Arc::new(BmuxEvent::AdversarialRetry {
-                sprint: 1,
-                attempt: attempt + 2, // next attempt number
+                sprint: sprint_num,
+                attempt: attempt + 2,
                 feedback: eval_result.feedback.clone(),
             }));
         }
     }
 
-    tracing::warn!("Adversarial sprint FAILED after {} attempts", max_retries + 1);
+    tracing::warn!(
+        sprint = sprint_num,
+        "Sprint FAILED after {} attempts",
+        max_retries + 1
+    );
     Ok(false)
 }
 
 // ── Agent query via PTY pane ──────────────────────────────────────────────────
 
-/// Send a prompt to an agent pane using `claude --print`, wait for completion,
-/// return the captured response text.
-///
-/// Protocol:
-///   1. Write prompt to a temp file (avoids shell escaping issues)
-///   2. Send `claude --print "$(cat PROMPT_FILE)" > OUTPUT_FILE 2>&1`
-///      followed by `echo BMUX_ADV_DONE >> OUTPUT_FILE`
-///   3. Poll OUTPUT_FILE until the sentinel "BMUX_ADV_DONE" appears
-///   4. Return output content (sentinel stripped)
 async fn query_agent(
     state: &DaemonState,
     pane_id: usize,
@@ -472,12 +599,10 @@ async fn query_agent(
     let of = output_file(session, role);
     let df = done_file(session, role);
 
-    // Write prompt; clean up previous output
     tokio::fs::write(&pf, prompt).await?;
     let _ = tokio::fs::remove_file(&of).await;
     let _ = tokio::fs::remove_file(&df).await;
 
-    // Build shell command — runs in the pane's interactive shell
     let cmd = format!(
         "claude --dangerously-skip-permissions --model {model} --print \"$(cat {pf})\" \
          > {of} 2>&1 && echo BMUX_ADV_DONE >> {of}\r"
@@ -488,7 +613,6 @@ async fn query_agent(
         sess.send_input_to_pane(pane_id, cmd.as_bytes())?;
     }
 
-    // Poll for completion (timeout: 5 minutes)
     let deadline = Instant::now() + Duration::from_secs(300);
     loop {
         tokio::time::sleep(Duration::from_secs(2)).await;
@@ -509,7 +633,6 @@ async fn query_agent(
         }
     }
 
-    // Timeout: return whatever we have
     let partial = tokio::fs::read_to_string(&of)
         .await
         .unwrap_or_else(|_| "(timeout — no response)".to_string());

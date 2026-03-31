@@ -1,102 +1,50 @@
 # Worktree wt2 — COMPLETE
 
-**Branch:** `bmux-web-wt2`
-**Completed:** 2026-03-29
+Branch: `bmux-adv2-wt2`
+Date: 2026-03-30
 
-## Stories Delivered
+## Stories Implemented
 
-| Story | Title | Status |
-|-------|-------|--------|
-| 3.1 | Next.js Project Scaffold & Layout | ✅ done |
-| 3.2 | Session Selector & WebSocket Connection | ✅ done |
-| 3.3 | Agent Cards Grid | ✅ done |
-| 3.4 | Shared Context Live Feed | ✅ done |
-| 3.5 | Task Queue Table | ✅ done |
-| 3.6 | Send Task Modal | ✅ done |
+### Story 2.1: Multi-Sprint Loop in Harness ✅
+- `run_inner()` now loops through all sprints from `adversarial:sprint_plan` context key
+- Falls back to single sprint from `config.prompt` when no plan exists
+- Each sprint: negotiate contract → build → evaluate → retry (up to max_retries)
+- Generator receives cumulative context from previous sprints
+- Correct events per sprint: AdversarialSprintPassed, AdversarialFailed, AdversarialComplete
+- Persists `adversarial:sprint` with current sprint number
+- New types: `SprintPlan`, `SprintSpec` in `src/adversarial/types.rs`
+- New helper: `parse_sprint_plan()` in `src/adversarial/parser.rs`
 
-## Build Verification
+### Story 2.2: Evaluator with Real Tools ✅
+- Evaluation prompt instructs Evaluator to RUN code, not just read it
+- Run `cargo test` / `npm test`, report exact test names and errors
+- Curl API endpoints, report URL/expected/actual on failures
+- Grep for security issues: unwrap on user input, hardcoded secrets, missing auth, SQL injection
+- All feedback includes file path and line number
+- Kill background processes before outputting evaluation JSON
 
-```
-npm run build → static export in bmux-web/out/
-✓ Compiled successfully (zero TypeScript errors)
-✓ 6 static routes generated
-```
+### Story 2.3: Git Commits per Feature ✅
+- Generator build prompt includes: `git add -A && git commit -m 'feat(sprint-N): <description>'` after each feature
+- Generator retry prompt includes: `git add -A && git commit -m 'fix(sprint-N): <what was fixed>'` after each fix
+- Sprint number interpolated correctly in commit message templates
 
-## Key Files
+## Files Changed
 
-```
-bmux-web/
-├── src/lib/types.ts          — Agent, Task, ContextEntry, Metrics, BmuxEvent
-├── src/lib/bmux-client.ts    — REST client with mock fallback
-├── src/lib/store.ts          — Zustand store + WebSocket event handler
-├── src/lib/mock-data.ts      — Dev mock data
-├── src/hooks/useBmuxWebSocket.ts  — WS hook, exponential backoff reconnect
-├── src/hooks/useAgents.ts    — Agent data loader
-├── src/components/
-│   ├── AgentCard.tsx         — Agent card with type icon, status badge, tokens
-│   ├── AgentsGrid.tsx        — Responsive 1/2/3-col grid
-│   ├── ContextFeed.tsx       — Live feed, expandable values, highlight animation
-│   ├── TaskQueue.tsx         — Task table with status filter tabs
-│   ├── SendTaskModal.tsx     — POST /api/tasks modal with toast
-│   ├── SessionSelector.tsx   — Auto-selects single session
-│   ├── ConnectionStatus.tsx  — Green/red connection indicator
-│   └── BmuxProvider.tsx      — Initializes data + WebSocket
-└── src/app/                  — Dashboard, Agents, Context, Tasks, Metrics pages
-```
+| File | Change |
+|------|--------|
+| `src/adversarial/types.rs` | Added SprintPlan, SprintSpec types |
+| `src/adversarial/parser.rs` | Added parse_sprint_plan() |
+| `src/adversarial/harness.rs` | Full rewrite: multi-sprint loop, real-tools eval prompt, git commit instructions |
 
-## API Expected (Feature 4-5, wt1)
-
-- `GET /api/sessions` → `Session[]`
-- `GET /api/agents?session=<name>` → `Agent[]`
-- `GET /api/context?session=<name>` → `ContextEntry[]`
-- `GET /api/tasks?session=<name>` → `Task[]`
-- `GET /api/metrics?session=<name>` → `Metrics`
-- `POST /api/tasks` `{ session, to_agent, content }` → `{ id }`
-- `WS /ws?session=<name>` → `BmuxEvent` JSON stream
-
-Falls back to mock data automatically when backend is unavailable.
-
----
-
-# Worktree wt3 — COMPLETE
-
-**Branch:** `bmux-adv-wt3`
-**Completed:** 2026-03-30
-**Build:** ✅ `npm run build` passed (10/10 pages, zero errors)
-
-## Stories Delivered
-
-| Story | Feature | Title | Status |
-|-------|---------|-------|--------|
-| 3.1 | 9 | Adversarial Status Panel | ✅ done |
-| 3.2 | 10 | Score Board & Evaluation History | ✅ done |
-| 3.3 | 11 | Adversarial WebSocket Events | ✅ done |
-| 4.1 | 12 | Planner Agent Integration | ✅ done |
-| 4.2 | 13 | Sprint Progress Dashboard | ✅ done |
-
-## Key Files
+## Test Results
 
 ```
-bmux-web/src/
-├── lib/
-│   ├── types.ts          — +AdversarialPhase, EvaluationScore, SprintAttempt,
-│   │                         AdversarialConfig, AdversarialState, +9 BmuxEvent types
-│   └── store.ts          — +adversarial slice, +9 handleEvent cases
-├── components/
-│   ├── AdversarialStatus.tsx   — phase badge, counters, progress bar, config info
-│   ├── ScoreBoard.tsx          — criterion table, pass/fail badges, glow anim, history
-│   ├── SprintTimeline.tsx      — horizontal timeline, click-to-expand ScoreBoard
-│   └── layout/Sidebar.tsx      — +Adversarial nav link
-└── app/adversarial/page.tsx    — full adversarial control page (models, prompt, start/stop,
-                                   multi-sprint checkbox, live panels)
+223 lib tests  — 0 failed
+22 agent_tests — 0 failed
+7 audit_log    — 0 failed
+10 integration — 0 failed
+5 hmac         — 0 failed
+4 sandbox      — 0 failed
+8 secrets      — 0 failed
+Total: 279 passed, 0 failed
 ```
-
-## WebSocket Events Handled
-
-`adversarial_started`, `adversarial_negotiating`, `adversarial_building`, `adversarial_evaluating`, `adversarial_scores`, `adversarial_retry`, `adversarial_sprint_passed`, `adversarial_failed`, `adversarial_complete`
-
-## File Ownership Respected
-
-- No changes to `src/adversarial/`, `src/agents/`, `src/tui/` (Forbidden)
-- No changes to `bmux-web/src/components/AdversarialPanel.tsx` (wt1 owned)
-- No changes to `src/web/` (wt2 owned)
