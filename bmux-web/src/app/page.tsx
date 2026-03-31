@@ -12,7 +12,7 @@ function formatTokens(tokens: number): string {
 }
 
 function formatCost(cost: number): string {
-  return `$${cost.toFixed(4)}`
+  return `$${(cost ?? 0).toFixed(4)}`
 }
 
 function formatUptime(seconds: number): string {

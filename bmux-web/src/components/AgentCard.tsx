@@ -32,8 +32,8 @@ function getAgentTypeEmoji(type: AgentType): string {
 }
 
 function formatCost(cost: number): string {
-  if (cost < 0.001) return `$${(cost * 1000).toFixed(2)}m`
-  return `$${cost.toFixed(4)}`
+  if ((cost ?? 0) < 0.001) return `$${((cost ?? 0) * 1000).toFixed(2)}m`
+  return `$${(cost ?? 0).toFixed(4)}`
 }
 
 function formatTokens(tokens: number): string {

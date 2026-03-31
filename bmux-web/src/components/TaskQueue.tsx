@@ -157,7 +157,7 @@ function TaskRow({ task }: { task: Task }) {
         </span>
       </TableCell>
       <TableCell className="text-right">
-        {task.cost_usd !== undefined ? (
+        {task.cost_usd != null ? (
           <span className="text-xs text-muted-foreground font-mono">
             ${task.cost_usd.toFixed(4)}
           </span>
