@@ -81,7 +81,13 @@ async fn run_inner(
     let total_sprints = sprints.len() as u32;
 
     let _ = events_tx.send(Arc::new(BmuxEvent::AdversarialStarted {
-        config: serde_json::to_value(&config).unwrap_or_default(),
+        config: crate::web::events::AdversarialConfigEvent {
+            generator_model: config.generator_model.clone(),
+            evaluator_model: config.evaluator_model.clone(),
+            prompt: config.prompt.clone(),
+            threshold: config.threshold,
+            max_retries: config.max_retries,
+        },
         total_sprints: Some(total_sprints),
     }));
 
@@ -544,13 +550,11 @@ async fn build_evaluate_loop(
             scores: eval_result
                 .scores
                 .iter()
-                .map(|s| {
-                    serde_json::json!({
-                        "criterion": s.name,
-                        "score": s.score,
-                        "threshold": s.threshold,
-                        "passed": s.score >= s.threshold
-                    })
+                .map(|s| crate::web::events::EvaluationScoreEvent {
+                    criterion: s.name.clone(),
+                    score: s.score,
+                    threshold: s.threshold,
+                    passed: s.score >= s.threshold,
                 })
                 .collect(),
             passed: eval_result.passed,

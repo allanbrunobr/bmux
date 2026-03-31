@@ -58,7 +58,7 @@ pub enum BmuxEvent {
 
     // ── Adversarial mode ─────────────────────────────────────────────────
     AdversarialStarted {
-        config: serde_json::Value,
+        config: AdversarialConfigEvent,
         total_sprints: Option<u32>,
     },
     AdversarialNegotiating {
@@ -74,7 +74,7 @@ pub enum BmuxEvent {
     AdversarialScores {
         sprint: u32,
         attempt: u32,
-        scores: Vec<serde_json::Value>,
+        scores: Vec<EvaluationScoreEvent>,
         passed: bool,
     },
     AdversarialRetry {
@@ -94,4 +94,24 @@ pub enum BmuxEvent {
         sprints_passed: u32,
         total_duration_ms: u64,
     },
+}
+
+/// Typed evaluation score matching frontend EvaluationScore interface.
+/// Fields: criterion, score, threshold, passed
+#[derive(Debug, Clone, Serialize)]
+pub struct EvaluationScoreEvent {
+    pub criterion: String,
+    pub score: f64,
+    pub threshold: f64,
+    pub passed: bool,
+}
+
+/// Typed config matching frontend AdversarialConfig interface.
+#[derive(Debug, Clone, Serialize)]
+pub struct AdversarialConfigEvent {
+    pub generator_model: String,
+    pub evaluator_model: String,
+    pub prompt: String,
+    pub threshold: u32,
+    pub max_retries: u32,
 }
