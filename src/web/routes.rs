@@ -130,15 +130,24 @@ pub async fn get_sessions(State(state): State<AppState>) -> impl IntoResponse {
         })
         .collect();
 
-    // Always include our own session if missing (race between write and read)
+    // For our own session, use real agent count from registry (not stale metadata)
     let own = &state.daemon.session_name;
+    let agent_count = state.daemon.agents.lock().await.list().len();
+
     let has_own = sessions.iter().any(|s| &s.name == own);
     let mut sessions = sessions;
-    if !has_own {
-        let window_count = state.daemon.session.lock().await.window_count();
+
+    if has_own {
+        // Update our session's agent count with the real value
+        for s in &mut sessions {
+            if &s.name == own {
+                s.agents = agent_count;
+            }
+        }
+    } else {
         sessions.push(SessionInfo {
             name: own.clone(),
-            agents: window_count.saturating_sub(1),
+            agents: agent_count,
             created_at: Utc::now().to_rfc3339(),
         });
     }
