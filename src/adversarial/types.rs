@@ -25,6 +25,10 @@ pub struct AdversarialConfig {
     pub generator_model: String,
     pub evaluator_model: String,
     pub max_retries: u32,
+    /// PRD content provided by the user; when present a Planner agent
+    /// breaks it into structured sprints before the build/evaluate loop.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prd_content: Option<String>,
 }
 
 impl Default for AdversarialConfig {
@@ -34,8 +38,24 @@ impl Default for AdversarialConfig {
             generator_model: "claude-opus-4-5".to_string(),
             evaluator_model: "claude-sonnet-4-5".to_string(),
             max_retries: 3,
+            prd_content: None,
         }
     }
+}
+
+/// A single sprint produced by the Planner agent.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PlannedSprint {
+    pub number: u32,
+    pub title: String,
+    pub features: Vec<String>,
+    pub criteria: Vec<Criterion>,
+}
+
+/// Full sprint plan output by the Planner agent.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SprintPlan {
+    pub sprints: Vec<PlannedSprint>,
 }
 
 /// Current phase of the adversarial harness.

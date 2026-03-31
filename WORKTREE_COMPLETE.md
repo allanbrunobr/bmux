@@ -1,50 +1,33 @@
-# Worktree wt2 — COMPLETE
+# Worktree wt1 — Complete
 
-Branch: `bmux-adv2-wt2`
+Branch: `bmux-adv2-wt1`
 Date: 2026-03-30
 
-## Stories Implemented
+## Stories Completed
 
-### Story 2.1: Multi-Sprint Loop in Harness ✅
-- `run_inner()` now loops through all sprints from `adversarial:sprint_plan` context key
-- Falls back to single sprint from `config.prompt` when no plan exists
-- Each sprint: negotiate contract → build → evaluate → retry (up to max_retries)
-- Generator receives cumulative context from previous sprints
-- Correct events per sprint: AdversarialSprintPassed, AdversarialFailed, AdversarialComplete
-- Persists `adversarial:sprint` with current sprint number
-- New types: `SprintPlan`, `SprintSpec` in `src/adversarial/types.rs`
-- New helper: `parse_sprint_plan()` in `src/adversarial/parser.rs`
+### Story 1.1: PRD Input in Dashboard ✅
+- `bmux-web/src/components/AdversarialPanel.tsx` — large PRD textarea + .md/.txt file upload button
+- `bmux-web/src/lib/bmux-client.ts` — `AdversarialStartRequestV2` with `prd_content`
+- `src/web/routes.rs` — `AdversarialStartBody.prd_content: Option<String>`
+- `src/adversarial/types.rs` — `AdversarialConfig.prd_content: Option<String>`
 
-### Story 2.2: Evaluator with Real Tools ✅
-- Evaluation prompt instructs Evaluator to RUN code, not just read it
-- Run `cargo test` / `npm test`, report exact test names and errors
-- Curl API endpoints, report URL/expected/actual on failures
-- Grep for security issues: unwrap on user input, hardcoded secrets, missing auth, SQL injection
-- All feedback includes file path and line number
-- Kill background processes before outputting evaluation JSON
+### Story 1.2: Planner Agent Sprint Generation ✅
+- `src/adversarial/types.rs` — `PlannedSprint`, `SprintPlan` types
+- `src/adversarial/parser.rs` — `parse_sprint_plan()` with fallback
+- `src/adversarial/harness.rs` — `run_planner()` spawns Sonnet planner, parses sprint plan, stores in `adversarial:sprint_plan`, emits `AdversarialStarted` with `total_sprints`
 
-### Story 2.3: Git Commits per Feature ✅
-- Generator build prompt includes: `git add -A && git commit -m 'feat(sprint-N): <description>'` after each feature
-- Generator retry prompt includes: `git add -A && git commit -m 'fix(sprint-N): <what was fixed>'` after each fix
-- Sprint number interpolated correctly in commit message templates
+## Build & Test Status
 
-## Files Changed
+- `cargo build` — success (warnings only, pre-existing)
+- `cargo test` — all tests pass (parser + security suites)
+- TypeScript — no new logic errors (env-level @types issues pre-existing)
 
-| File | Change |
-|------|--------|
-| `src/adversarial/types.rs` | Added SprintPlan, SprintSpec types |
-| `src/adversarial/parser.rs` | Added parse_sprint_plan() |
-| `src/adversarial/harness.rs` | Full rewrite: multi-sprint loop, real-tools eval prompt, git commit instructions |
+## Features Updated
 
-## Test Results
+- Feature 1: PRD Input in Dashboard → done
+- Feature 2: Planner Agent Sprint Generation → done
 
-```
-223 lib tests  — 0 failed
-22 agent_tests — 0 failed
-7 audit_log    — 0 failed
-10 integration — 0 failed
-5 hmac         — 0 failed
-4 sandbox      — 0 failed
-8 secrets      — 0 failed
-Total: 279 passed, 0 failed
-```
+## Commits
+
+- b1b8521 feat(story-1.1): PRD input in adversarial dashboard
+- 119cb0a feat(story-1.2): Planner agent sprint generation

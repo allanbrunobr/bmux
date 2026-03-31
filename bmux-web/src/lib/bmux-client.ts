@@ -1,4 +1,13 @@
-import type { Agent, ContextEntry, Task, Session, Metrics, AdversarialStartRequest } from './types';
+import type { Agent, ContextEntry, Task, Session, Metrics, AdversarialStartRequest, AdversarialModel } from './types';
+
+// Extended start request that includes prd_content for Planner agent (Story 1.1).
+export interface AdversarialStartRequestV2 {
+  session: string;
+  generator_model: AdversarialModel;
+  evaluator_model: AdversarialModel;
+  prompt?: string;
+  prd_content?: string;
+}
 import {
   getMockSessions,
   getMockAgents,
@@ -87,7 +96,7 @@ export class BmuxClient {
     }
   }
 
-  async startAdversarialLoop(req: AdversarialStartRequest): Promise<{ ok: boolean }> {
+  async startAdversarialLoop(req: AdversarialStartRequest | AdversarialStartRequestV2): Promise<{ ok: boolean }> {
     try {
       const res = await fetch(`${API_BASE}/api/adversarial/start`, {
         method: 'POST',

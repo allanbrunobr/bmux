@@ -1,6 +1,7 @@
 "use client"
 
-import { Loader2 } from 'lucide-react'
+import { useRef, useState, type ChangeEvent } from 'react'
+import { Loader2, Upload } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { ModelSelector } from '@/components/ModelSelector'
@@ -13,21 +14,35 @@ export function AdversarialPanel() {
     adversarialRunning,
     generatorModel,
     evaluatorModel,
-    adversarialPrompt,
     setAdversarialRunning,
     setGeneratorModel,
     setEvaluatorModel,
-    setAdversarialPrompt,
   } = useBmuxStore()
 
+  const [prdContent, setPrdContent] = useState('')
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  function handleFileUpload(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = (ev) => {
+      const text = ev.target?.result
+      if (typeof text === 'string') setPrdContent(text)
+    }
+    reader.readAsText(file)
+    // Reset so same file can be re-uploaded
+    e.target.value = ''
+  }
+
   async function handleStart() {
-    if (!activeSession || !adversarialPrompt.trim()) return
+    if (!activeSession || !prdContent.trim()) return
     setAdversarialRunning(true)
     await bmuxClient.startAdversarialLoop({
       session: activeSession,
       generator_model: generatorModel,
       evaluator_model: evaluatorModel,
-      prompt: adversarialPrompt,
+      prd_content: prdContent,
     })
   }
 
@@ -52,16 +67,36 @@ export function AdversarialPanel() {
           onChange={setEvaluatorModel}
         />
 
-        {/* Prompt input */}
+        {/* PRD input */}
         <div className="flex flex-col gap-1 flex-1 min-w-64">
-          <span className="text-xs text-muted-foreground">Task Prompt</span>
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-muted-foreground">Paste PRD here</span>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              className="h-5 px-1.5 text-xs gap-1"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={adversarialRunning}
+            >
+              <Upload className="h-3 w-3" />
+              Upload .md
+            </Button>
+          </div>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".md,.txt"
+            className="hidden"
+            onChange={handleFileUpload}
+          />
           <Textarea
-            placeholder="e.g. Build a REST API with JWT auth"
-            className="h-8 min-h-0 resize-none text-xs py-1.5"
-            value={adversarialPrompt}
-            onChange={(e) => setAdversarialPrompt(e.target.value)}
+            placeholder="Paste your PRD here or upload a .md file…"
+            className="min-h-[80px] resize-y text-xs py-1.5"
+            value={prdContent}
+            onChange={(e) => setPrdContent(e.target.value)}
             disabled={adversarialRunning}
-            rows={1}
+            rows={4}
           />
         </div>
 
@@ -79,7 +114,7 @@ export function AdversarialPanel() {
           <Button
             size="sm"
             onClick={handleStart}
-            disabled={!adversarialPrompt.trim()}
+            disabled={!prdContent.trim()}
             className="h-8 text-xs bg-amber-600 hover:bg-amber-500 text-white"
           >
             {adversarialRunning ? (
