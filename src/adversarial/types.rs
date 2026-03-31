@@ -1,5 +1,23 @@
 use serde::{Deserialize, Serialize};
 
+/// A single sprint in the Planner's output spec.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SprintSpec {
+    pub number: u32,
+    pub title: String,
+    #[serde(default)]
+    pub features: Vec<String>,
+    #[serde(default)]
+    pub criteria: Vec<Criterion>,
+}
+
+/// The full sprint plan produced by the Planner agent.
+/// Stored in context as `adversarial:sprint_plan`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SprintPlan {
+    pub sprints: Vec<SprintSpec>,
+}
+
 /// Configuration for a single adversarial sprint.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AdversarialConfig {
