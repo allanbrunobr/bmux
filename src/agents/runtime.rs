@@ -5,6 +5,9 @@ use std::path::Path;
 use crate::agents::adapter::AgentConfig;
 use crate::config::agent_catalog;
 use crate::config::settings::BmuxConfig;
+use portable_pty::CommandBuilder;
+
+use crate::security::agent_spawn;
 use crate::security::envelope::SecurityEnvelope;
 
 /// Resolves agent configuration and builds safe launch commands for daemon spawns.
@@ -67,6 +70,24 @@ impl<'a> AgentRuntime<'a> {
             &config.args,
             &config.model,
             agent_type,
+        )
+    }
+
+    /// Build a structured PTY command for direct spawn (preferred daemon path).
+    pub fn build_pty_command(
+        &self,
+        agent_name: &str,
+        agent_type: &str,
+        config: &AgentConfig,
+    ) -> CommandBuilder {
+        agent_spawn::build_agent_pty_command(
+            self.envelope,
+            self.ipc_socket,
+            agent_name,
+            agent_type,
+            &config.binary,
+            &config.args,
+            &config.model,
         )
     }
 }

@@ -147,7 +147,7 @@ impl SecurityEnvelope {
         agent_name: &str,
     ) -> String {
         let mut parts = vec!["env".to_string(), "-i".to_string()];
-        parts.extend(self.bmux_env_pairs(ipc_socket, agent_name, agent_type));
+        parts.extend(self.bmux_env_pair_strings(ipc_socket, agent_name, agent_type));
         parts.push(binary.to_string());
         for arg in args {
             parts.push(Self::shell_quote(arg));
@@ -167,38 +167,51 @@ impl SecurityEnvelope {
     ) -> Vec<String> {
         self.bmux_env_pairs(ipc_socket, agent_name, agent_type)
             .into_iter()
-            .map(|pair| format!("export {pair}"))
+            .map(|(k, v)| format!("export {k}={}", Self::shell_quote(&v)))
             .collect()
     }
 
-    fn bmux_env_pairs(
+    /// Key/value pairs for `env -i` or CommandBuilder::env (values unquoted).
+    pub fn bmux_env_pairs(
+        &self,
+        ipc_socket: &Path,
+        agent_name: &str,
+        agent_type: &str,
+    ) -> Vec<(String, String)> {
+        let mut pairs = vec![
+            ("BMUX_SESSION".to_string(), self.session_id.clone()),
+            (
+                "BMUX_SOCKET".to_string(),
+                ipc_socket.display().to_string(),
+            ),
+            ("BMUX_AGENT_NAME".to_string(), agent_name.to_string()),
+            ("BMUX_AGENT_TYPE".to_string(), agent_type.to_string()),
+            (
+                "BMUX_PROJECT_DIR".to_string(),
+                self.project_dir.display().to_string(),
+            ),
+        ];
+        if let Some(path) = SecretsManager::default_path() {
+            if path.exists() && !self.secrets.is_empty() {
+                pairs.push((
+                    "BMUX_SECRETS_PATH".to_string(),
+                    path.display().to_string(),
+                ));
+            }
+        }
+        pairs
+    }
+
+    fn bmux_env_pair_strings(
         &self,
         ipc_socket: &Path,
         agent_name: &str,
         agent_type: &str,
     ) -> Vec<String> {
-        let mut pairs = vec![
-            format!("BMUX_SESSION={}", Self::shell_quote(&self.session_id)),
-            format!(
-                "BMUX_SOCKET={}",
-                Self::shell_quote(&ipc_socket.display().to_string())
-            ),
-            format!("BMUX_AGENT_NAME={}", Self::shell_quote(agent_name)),
-            format!("BMUX_AGENT_TYPE={}", Self::shell_quote(agent_type)),
-            format!(
-                "BMUX_PROJECT_DIR={}",
-                Self::shell_quote(&self.project_dir.display().to_string())
-            ),
-        ];
-        if let Some(path) = SecretsManager::default_path() {
-            if path.exists() && !self.secrets.is_empty() {
-                pairs.push(format!(
-                    "BMUX_SECRETS_PATH={}",
-                    Self::shell_quote(&path.display().to_string())
-                ));
-            }
-        }
-        pairs
+        self.bmux_env_pairs(ipc_socket, agent_name, agent_type)
+            .into_iter()
+            .map(|(k, v)| format!("{k}={}", Self::shell_quote(&v)))
+            .collect()
     }
 
     fn wrap_sandbox_if_enabled(&self, inner_cmd: &str, agent_name: &str, agent_type: &str) -> String {

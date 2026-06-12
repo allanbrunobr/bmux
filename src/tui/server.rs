@@ -438,19 +438,19 @@ async fn handle_client_message(
                 return Ok(HandleResult::Reply(ServerMessage::QueryResult { data }));
             }
 
-            let agent_cmd = runtime.build_launch_command(&name, &agent_type, &config);
+            let pty_cmd = runtime.build_pty_command(&name, &agent_type, &config);
 
-            // Split window — session lock acquired and released in this block
-            let pane_id = {
+            // Split window and spawn structured PTY command — session lock released after block
+            let (pane_id, child_pid) = {
                 let mut sess = state.session.lock().await;
-                match sess.split_and_run_command(&agent_cmd) {
-                    Ok(id) => id,
+                match sess.split_and_spawn_agent(pty_cmd) {
+                    Ok(ids) => ids,
                     Err(e) => {
                         let data = format!("Error creating agent pane: {}", e);
                         return Ok(HandleResult::Reply(ServerMessage::QueryResult { data }));
                     }
                 }
-            }; // session lock dropped here
+            };
 
             let icon = agent_type_icon(&agent_type);
             let cost = config.cost_per_1k_tokens;
@@ -462,6 +462,7 @@ async fn handle_client_message(
                 reg.register(&name, &agent_type, config);
                 if let Some(info) = reg.get_mut(&name) {
                     info.pane_id = Some(pane_id);
+                    info.pid = child_pid;
                 }
             } // agents lock dropped here
 

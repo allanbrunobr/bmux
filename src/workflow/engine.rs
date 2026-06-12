@@ -11,12 +11,12 @@
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::orchestration::task_router::TaskRouter;
+use crate::orchestration::task_router::{SendResult, TaskRouter, TaskStatus};
 use crate::storage::context_store::ContextStore;
 use crate::workflow::yaml_parser::WorkflowDag;
 
@@ -307,41 +307,79 @@ impl WorkflowEngine {
                     let resolved_prompt =
                         resolve_template(&step.prompt, &input_clone, &ctx, &run_id_str);
 
-                    // Dispatch via TaskRouter
-                    let result = router
+                    let send_result = router
                         .send_to_agent(&step.agent, &resolved_prompt, 1)
                         .await
                         .map_err(|e| EngineError::StepFailed {
                             step: step.id.clone(),
                             error: e.to_string(),
-                        });
+                        })?;
+
+                    let task_id = match send_result {
+                        SendResult::Dispatched { task_id } => task_id,
+                        SendResult::Queued { task_id, .. } => task_id,
+                    };
+
+                    let timeout = step
+                        .timeout_seconds
+                        .map(Duration::from_secs)
+                        .or(Some(Duration::from_secs(3600)));
+                    let finished = router
+                        .wait_for_task(&task_id, timeout)
+                        .await
+                        .map_err(|e| EngineError::StepFailed {
+                            step: step.id.clone(),
+                            error: e.to_string(),
+                        })?;
 
                     let duration_ms = start.elapsed().as_millis() as u64;
 
-                    match result {
-                        Ok(send_result) => {
-                            // Store output in context
-                            let output_key = format!("workflow:{run_id_str}:{}:output", step.id);
-                            let output_str = format!("{:?}", send_result);
+                    match finished.status {
+                        TaskStatus::Completed => {
+                            let output_key = step.context_key.clone().unwrap_or_else(|| {
+                                format!("workflow:{run_id_str}:{}:output", step.id)
+                            });
+                            let (output_str, cost_usd) = if let Some(result) = finished.result {
+                                (result.content, result.cost_usd)
+                            } else {
+                                (String::new(), 0.0)
+                            };
                             let _ = ctx.set(&output_key, &output_str, None);
 
-                            // Update step record as Completed
                             let mut r = run_clone.lock().unwrap();
                             if let Some(rec) = r.steps.iter_mut().find(|s| s.step_id == step.id) {
                                 rec.status = StepStatus::Completed;
                                 rec.duration_ms = Some(duration_ms);
-                                rec.cost_usd = Some(0.0); // stub: real cost from agent
+                                rec.cost_usd = Some(cost_usd);
                             }
                             Ok(step.id.clone())
                         }
-                        Err(e) => {
-                            // Mark step as Failed
+                        TaskStatus::Failed | TaskStatus::TimedOut | TaskStatus::Cancelled => {
+                            let err = format!(
+                                "task {task_id} ended with status {}",
+                                finished.status
+                            );
                             let mut r = run_clone.lock().unwrap();
                             if let Some(rec) = r.steps.iter_mut().find(|s| s.step_id == step.id) {
-                                rec.status = StepStatus::Failed(e.to_string());
+                                rec.status = StepStatus::Failed(err.clone());
                                 rec.duration_ms = Some(duration_ms);
                             }
-                            Err(e)
+                            Err(EngineError::StepFailed {
+                                step: step.id.clone(),
+                                error: err,
+                            })
+                        }
+                        TaskStatus::Queued | TaskStatus::Active => {
+                            let err = format!("task {task_id} still in progress after wait");
+                            let mut r = run_clone.lock().unwrap();
+                            if let Some(rec) = r.steps.iter_mut().find(|s| s.step_id == step.id) {
+                                rec.status = StepStatus::Failed(err.clone());
+                                rec.duration_ms = Some(duration_ms);
+                            }
+                            Err(EngineError::StepFailed {
+                                step: step.id.clone(),
+                                error: err,
+                            })
                         }
                     }
                 }));

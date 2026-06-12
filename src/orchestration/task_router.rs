@@ -237,6 +237,51 @@ impl TaskRouter {
         tasks.get(task_id).cloned()
     }
 
+    /// Poll until a task reaches a terminal state or the timeout elapses.
+    ///
+    /// Returns the final task record. On timeout, marks Active/Queued tasks as
+    /// `TimedOut` and returns the updated record.
+    pub async fn wait_for_task(
+        &self,
+        task_id: &str,
+        timeout: Option<Duration>,
+    ) -> Result<Task> {
+        let deadline = timeout.map(|t| Instant::now() + t);
+
+        loop {
+            if let Some(task) = self.task_status(task_id).await {
+                match task.status {
+                    TaskStatus::Completed
+                    | TaskStatus::Failed
+                    | TaskStatus::Cancelled
+                    | TaskStatus::TimedOut => return Ok(task),
+                    TaskStatus::Queued | TaskStatus::Active => {}
+                }
+            } else {
+                return Err(anyhow!("Task '{task_id}' not found"));
+            }
+
+            if let Some(deadline) = deadline {
+                if Instant::now() >= deadline {
+                    let mut tasks = self.tasks.write().await;
+                    if let Some(task) = tasks.get_mut(task_id) {
+                        if matches!(
+                            task.status,
+                            TaskStatus::Queued | TaskStatus::Active
+                        ) {
+                            task.status = TaskStatus::TimedOut;
+                            warn!(task_id = %task_id, "Task timed out while waiting for completion");
+                        }
+                        return Ok(task.clone());
+                    }
+                    return Err(anyhow!("Task '{task_id}' not found"));
+                }
+            }
+
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    }
+
     // -----------------------------------------------------------------------
     // Story 3.4 — Auto-Route Tasks by Cost & Capability
     // -----------------------------------------------------------------------
@@ -1070,6 +1115,53 @@ mod tests {
         let _ast = bus.agent_status();
         let map = _ast.read().await;
         assert_eq!(map.get("arch"), Some(&AgentState::Idle));
+
+        bus.stop();
+    }
+
+    #[tokio::test]
+    async fn test_wait_for_task_returns_on_completion() {
+        let (bus, router) = make_router().await;
+        router.register_agent(make_agent("arch", "sonnet", 0.003, vec![])).await;
+        sleep(Duration::from_millis(20)).await;
+
+        let send_result = router.send_to_agent("arch", "wait me", 1).await.unwrap();
+        let task_id = match send_result {
+            SendResult::Dispatched { task_id } => task_id,
+            _ => panic!("expected dispatch"),
+        };
+
+        let full_id = {
+            let tasks = router.tasks.read().await;
+            tasks.get(&task_id).unwrap().full_id.clone()
+        };
+
+        let router_bg = Arc::new(router);
+        let router_clone = Arc::clone(&router_bg);
+        let full_id_bg = full_id.clone();
+        tokio::spawn(async move {
+            sleep(Duration::from_millis(50)).await;
+            router_clone
+                .handle_result(
+                    &full_id_bg,
+                    ResultPayload {
+                        content: "done".into(),
+                        tokens_used: 10,
+                        cost_usd: 0.01,
+                        duration_ms: 100,
+                        task_id: Some(full_id_bg.clone()),
+                    },
+                )
+                .await
+                .unwrap();
+        });
+
+        let finished = router_bg
+            .wait_for_task(&task_id, Some(Duration::from_secs(2)))
+            .await
+            .unwrap();
+        assert_eq!(finished.status, TaskStatus::Completed);
+        assert_eq!(finished.result.unwrap().content, "done");
 
         bus.stop();
     }
