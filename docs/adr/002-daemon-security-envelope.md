@@ -21,8 +21,9 @@ Production spawn bypassed sandbox, audit, and safe command building. `--dangerou
 ## Consequences
 
 - Positive: CI green; task loop closes; audit on spawn/kill/task/context.
-- Negative: PTY-based spawn still runs inside `$SHELL`; full `pre_exec` sandbox requires adapter/PTY bridge (tracked separately).
-- Negative: workflow `run` without `--dry-run` remains stub until WorkflowRun IPC lands.
+- Negative: Linux Landlock cannot apply to PTY-typed spawns; macOS uses `sandbox-exec` wrapper when enabled.
+- Follow-up: `create_secret_fd` requires structured `spawn_command` (not shell line injection).
+- Workflow `run` wired via `WorkflowRun` / `WorkflowStatus` IPC (ADR-003).
 
 ## Compliance
 

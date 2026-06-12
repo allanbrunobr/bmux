@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use thiserror::Error;
+use tracing::warn;
 
 use crate::config::settings::SecurityConfig;
 use crate::storage::audit_log::{AuditEntry, AuditLogger, EventType};
@@ -93,6 +94,9 @@ impl SecurityEnvelope {
     }
 
     /// Build a safe shell command to launch an agent inside an existing pane shell.
+    ///
+    /// Non-shell agents use `env -i` with a minimal allowlist (no inherited secrets/env).
+    /// macOS may wrap with `sandbox-exec` when `[security] sandbox` is enabled.
     pub fn build_agent_launch_command(
         &self,
         agent_name: &str,
@@ -102,27 +106,137 @@ impl SecurityEnvelope {
         model: &str,
         agent_type: &str,
     ) -> String {
-        let mut parts = vec![
-            format!("export BMUX_SESSION={}", Self::shell_quote(&self.session_id)),
+        let inner = if agent_type == "shell" {
+            self.build_shell_launch_inner(ipc_socket, binary, args, model, agent_type, agent_name)
+        } else {
+            self.build_isolated_launch_inner(
+                ipc_socket, binary, args, model, agent_type, agent_name,
+            )
+        };
+        self.wrap_sandbox_if_enabled(&inner, agent_name, agent_type)
+    }
+
+    fn build_shell_launch_inner(
+        &self,
+        ipc_socket: &Path,
+        binary: &str,
+        args: &[String],
+        model: &str,
+        agent_type: &str,
+        agent_name: &str,
+    ) -> String {
+        let mut parts = self.bmux_env_exports(ipc_socket, agent_name, agent_type);
+        parts.push(binary.to_string());
+        for arg in args {
+            parts.push(Self::shell_quote(arg));
+        }
+        if !model.is_empty() {
+            parts.push("--model".to_string());
+            parts.push(Self::shell_quote(model));
+        }
+        parts.join(" ")
+    }
+
+    fn build_isolated_launch_inner(
+        &self,
+        ipc_socket: &Path,
+        binary: &str,
+        args: &[String],
+        model: &str,
+        agent_type: &str,
+        agent_name: &str,
+    ) -> String {
+        let mut parts = vec!["env".to_string(), "-i".to_string()];
+        parts.extend(self.bmux_env_pairs(ipc_socket, agent_name, agent_type));
+        parts.push(binary.to_string());
+        for arg in args {
+            parts.push(Self::shell_quote(arg));
+        }
+        if !model.is_empty() {
+            parts.push("--model".to_string());
+            parts.push(Self::shell_quote(model));
+        }
+        parts.join(" ")
+    }
+
+    fn bmux_env_exports(
+        &self,
+        ipc_socket: &Path,
+        agent_name: &str,
+        agent_type: &str,
+    ) -> Vec<String> {
+        self.bmux_env_pairs(ipc_socket, agent_name, agent_type)
+            .into_iter()
+            .map(|pair| format!("export {pair}"))
+            .collect()
+    }
+
+    fn bmux_env_pairs(
+        &self,
+        ipc_socket: &Path,
+        agent_name: &str,
+        agent_type: &str,
+    ) -> Vec<String> {
+        let mut pairs = vec![
+            format!("BMUX_SESSION={}", Self::shell_quote(&self.session_id)),
             format!(
                 "BMUX_SOCKET={}",
                 Self::shell_quote(&ipc_socket.display().to_string())
             ),
             format!("BMUX_AGENT_NAME={}", Self::shell_quote(agent_name)),
             format!("BMUX_AGENT_TYPE={}", Self::shell_quote(agent_type)),
-            binary.to_string(),
+            format!(
+                "BMUX_PROJECT_DIR={}",
+                Self::shell_quote(&self.project_dir.display().to_string())
+            ),
         ];
+        if let Some(path) = SecretsManager::default_path() {
+            if path.exists() && !self.secrets.is_empty() {
+                pairs.push(format!(
+                    "BMUX_SECRETS_PATH={}",
+                    Self::shell_quote(&path.display().to_string())
+                ));
+            }
+        }
+        pairs
+    }
 
-        for arg in args {
-            parts.push(Self::shell_quote(arg));
+    fn wrap_sandbox_if_enabled(&self, inner_cmd: &str, agent_name: &str, agent_type: &str) -> String {
+        if agent_type == "shell" || self.security.sandbox == "none" {
+            return inner_cmd.to_string();
         }
 
-        if !model.is_empty() && agent_type != "shell" {
-            parts.push("--model".to_string());
-            parts.push(Self::shell_quote(model));
+        #[cfg(target_os = "macos")]
+        {
+            use std::io::Write;
+            let profile = crate::security::sandbox::build_seatbelt_profile(&self.project_dir);
+            let path = std::env::temp_dir().join(format!(
+                "bmux-sandbox-{}-{}.sb",
+                self.session_id.replace(['/', '\\', ':'], "_"),
+                agent_name.replace(['/', '\\', ':'], "_"),
+            ));
+            if let Ok(mut f) = std::fs::File::create(&path) {
+                if f.write_all(profile.as_bytes()).is_ok() {
+                    return format!(
+                        "sandbox-exec -f {} sh -c {}",
+                        Self::shell_quote(&path.display().to_string()),
+                        Self::shell_quote(inner_cmd),
+                    );
+                }
+            }
+            warn!(agent = %agent_name, "Failed to write Seatbelt profile; spawning without sandbox");
+            inner_cmd.to_string()
         }
 
-        parts.join(" ")
+        #[cfg(not(target_os = "macos"))]
+        {
+            let _ = agent_name;
+            warn!(
+                sandbox = %self.security.sandbox,
+                "PTY spawn cannot apply Landlock to agent child; use env -i isolation only"
+            );
+            inner_cmd.to_string()
+        }
     }
 
     pub fn log_agent_spawned(
@@ -217,5 +331,28 @@ mod tests {
             SecurityEnvelope::shell_quote("hello world"),
             "'hello world'"
         );
+    }
+
+    #[test]
+    fn isolated_launch_uses_env_i() {
+        let mut security = SecurityConfig::default();
+        security.sandbox = "none".to_string();
+        let env = SecurityEnvelope::new(
+            "test",
+            PathBuf::from("/tmp/project"),
+            security,
+            false,
+        );
+        let cmd = env.build_agent_launch_command(
+            "arch",
+            Path::new("/tmp/bmux-test-ipc.sock"),
+            "claude",
+            &[],
+            "claude-sonnet-4-20250514",
+            "claude-code",
+        );
+        assert!(cmd.starts_with("env -i "));
+        assert!(cmd.contains("BMUX_SESSION=test"));
+        assert!(cmd.contains("BMUX_PROJECT_DIR="));
     }
 }

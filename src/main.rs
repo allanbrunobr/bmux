@@ -407,7 +407,7 @@ async fn cmd_workflow(session: Option<&str>, action: WorkflowCommands) -> Result
     use bmux::workflow::yaml_parser::WorkflowParser;
 
     match action {
-        WorkflowCommands::Run { file, input: _, dry_run } => {
+        WorkflowCommands::Run { file, input, dry_run } => {
             let parser = WorkflowParser::new();
             let settings = BmuxConfig::load().unwrap_or_default();
             let dag = parser.parse_file(&file)?;
@@ -416,10 +416,18 @@ async fn cmd_workflow(session: Option<&str>, action: WorkflowCommands) -> Result
                 let summary = parser.dry_run_summary(&dag, &settings);
                 println!("{}", summary);
             } else {
-                // TODO: send WorkflowRun message to daemon via IPC
-                let _sock = bmux::tui::ipc_client::resolve_session(session)?;
-                println!("Workflow execution via IPC — not yet implemented.");
-                println!("Use --dry-run to validate.");
+                use bmux::tui::ipc_client::{query, resolve_session};
+                use bmux::tui::protocol::ClientMessage;
+                let sock = resolve_session(session)?;
+                let result = query(
+                    &sock,
+                    ClientMessage::WorkflowRun {
+                        file: file.clone(),
+                        input: input.clone(),
+                    },
+                )
+                .await?;
+                println!("{}", result);
             }
             Ok(())
         }
@@ -444,9 +452,11 @@ async fn cmd_workflow(session: Option<&str>, action: WorkflowCommands) -> Result
             Ok(())
         }
         WorkflowCommands::Status { id } => {
-            // TODO: query daemon for workflow status
-            let _sock = bmux::tui::ipc_client::resolve_session(session)?;
-            println!("Workflow status for '{}' — not yet implemented via IPC.", id);
+            use bmux::tui::ipc_client::{query, resolve_session};
+            use bmux::tui::protocol::ClientMessage;
+            let sock = resolve_session(session)?;
+            let result = query(&sock, ClientMessage::WorkflowStatus { id: id.clone() }).await?;
+            println!("{}", result);
             Ok(())
         }
     }
