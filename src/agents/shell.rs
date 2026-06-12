@@ -48,6 +48,10 @@ impl ShellAdapter {
     pub fn is_running(&self) -> bool {
         self.child.is_some()
     }
+
+    pub fn shell_path(&self) -> &str {
+        &self.shell
+    }
 }
 
 #[async_trait]

@@ -41,6 +41,10 @@ impl OpenCodeAdapter {
     pub fn is_running(&self) -> bool {
         self.child.is_some()
     }
+
+    pub fn usage(&self) -> (u64, f64) {
+        (self.tokens_used, self.cost_usd)
+    }
 }
 
 #[async_trait]
@@ -110,6 +114,8 @@ impl AgentAdapter for OpenCodeAdapter {
 
             let tokens = (line.len() / 4).max(1) as u64;
             let cost = tokens as f64 * self.cost_per_1k_tokens() / 1000.0;
+            self.tokens_used += tokens;
+            self.cost_usd += cost;
 
             Ok(AgentOutput {
                 content: line.trim_end().to_string(),

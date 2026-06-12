@@ -362,7 +362,8 @@ async fn cmd_task(session: Option<&str>, action: TaskCommands) -> Result<()> {
     let sock = resolve_session(session)?;
 
     let msg = match action {
-        TaskCommands::Send { agent, content, auto: _, model } => {
+        TaskCommands::Send { agent, content, auto, model } => {
+            let agent = if auto { None } else { agent };
             ClientMessage::TaskSend { agent, content, model }
         }
         TaskCommands::List => ClientMessage::TaskList,

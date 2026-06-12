@@ -1,6 +1,7 @@
 /// Sled-backed shared context store, namespaced per session.
 ///
-/// Key format in sled: `{session_id}\x00{user_key}` (null byte separator)
+/// Keys are stored as raw `user_key` bytes. Isolation is per-session via a
+/// separate sled database directory (`ctx_{session_id}/`).
 /// Value format: serialized `StoredEntry` JSON
 ///
 /// Stories: 4.1, 4.2, 4.3, 4.4
@@ -44,7 +45,6 @@ pub struct ContextEntry {
 
 /// The main context store handle.
 pub struct ContextStore {
-    session_id: String,
     db: sled::Db,
 }
 
@@ -59,10 +59,8 @@ impl ContextStore {
         let db_path = base_path.join(format!("ctx_{safe_id}"));
         std::fs::create_dir_all(&db_path)?;
         let db = sled::open(&db_path)?;
-        Ok(Self {
-            session_id: session_id.to_string(),
-            db,
-        })
+        let _ = session_id;
+        Ok(Self { db })
     }
 
     // ─── internal key helpers ────────────────────────────────────────────────

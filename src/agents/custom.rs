@@ -94,12 +94,17 @@ impl AgentAdapter for CustomAdapter {
     }
 
     async fn spawn(&mut self, config: &AgentConfig) -> anyhow::Result<()> {
-        let binary = &config.binary;
+        let binary = if config.binary.is_empty() {
+            &self.binary
+        } else {
+            &config.binary
+        };
         which::which(binary)
             .with_context(|| format!("Agent binary '{}' not found in PATH", binary))?;
 
         let mut cmd = Command::new(binary);
-        cmd.args(&config.args)
+        cmd.args(&self.extra_args)
+            .args(&config.args)
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped());
