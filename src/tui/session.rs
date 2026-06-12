@@ -41,6 +41,21 @@ impl Session {
         self.windows.len()
     }
 
+    /// UTC timestamp when this session was created.
+    pub fn created_at(&self) -> DateTime<Utc> {
+        self.created_at
+    }
+
+    /// Kill the child process backing a pane (used when terminating agents).
+    pub fn kill_pane(&mut self, pane_id: usize) -> Result<()> {
+        for window in &mut self.windows {
+            if let Some(pane) = window.pane_mut(pane_id) {
+                return pane.kill();
+            }
+        }
+        anyhow::bail!("Pane {} not found in any window", pane_id)
+    }
+
     pub fn active_window(&mut self) -> &mut Window {
         &mut self.windows[self.active_window]
     }

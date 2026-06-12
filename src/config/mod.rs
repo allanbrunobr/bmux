@@ -1,3 +1,4 @@
+pub mod agent_catalog;
 pub mod settings;
 
 pub use settings::BmuxConfig;

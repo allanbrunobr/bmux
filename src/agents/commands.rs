@@ -54,8 +54,7 @@ pub async fn handle_spawn(
         // Custom agent: look up by name in config
         bmux_config
             .agents
-            .get(name)
-            
+            .get_custom(name)
             .ok_or_else(|| anyhow::anyhow!(
                 "Custom agent '{}' not found in config.toml. Add [agents.{}] section.",
                 name, name
@@ -64,8 +63,10 @@ pub async fn handle_spawn(
         // Built-in agent type: start with defaults, check user config overrides
         bmux_config
             .agents
-            .get(agent_type)
-            
+            .get(
+                agent_type,
+                bmux_config.security.allow_dangerous_permissions,
+            )
             .unwrap_or_else(|| BmuxConfig::default_agent_config(agent_type))
     };
 

@@ -150,8 +150,8 @@ impl Layout {
 
     /// The pane immediately to the left of `pane_id`, or `None` at the edge.
     pub fn pane_to_left(&self, pane_id: usize, area: Rect) -> Option<usize> {
+        let cur = self.rect_of(pane_id, area)?;
         let rects = self.compute_rects(area);
-        let cur = rects.iter().find(|(id, _)| *id == pane_id)?.1;
         let cy = cur.y + cur.height / 2;
         rects
             .iter()

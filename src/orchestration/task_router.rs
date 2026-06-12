@@ -109,6 +109,11 @@ impl TaskRouter {
         }
     }
 
+    /// Access the underlying message bus (for daemon lifecycle wiring).
+    pub fn message_bus(&self) -> &Arc<MessageBus> {
+        &self.bus
+    }
+
     /// Register a known agent with the router.
     pub async fn register_agent(&self, info: AgentInfo) {
         let mut agents = self.agents.write().await;

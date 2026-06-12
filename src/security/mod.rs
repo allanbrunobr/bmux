@@ -3,6 +3,7 @@
 // Story 6.2: secrets (API key management)
 // Story 6.x: hmac (IPC authentication)
 
+pub mod envelope;
 pub mod hmac;
 pub mod sandbox;
 pub mod secrets;

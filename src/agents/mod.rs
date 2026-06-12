@@ -15,6 +15,7 @@ pub mod generic_cli;
 pub mod opencode;
 pub mod pi;
 pub mod registry;
+pub mod runtime;
 pub mod shell;
 
 // Re-export key types for ergonomic use

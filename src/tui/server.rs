@@ -19,9 +19,11 @@ use tokio::{
 use crate::agents::adapter::AgentConfig;
 use crate::agents::registry::AgentRegistry;
 use crate::agents::commands::agent_type_icon;
+use crate::agents::runtime::AgentRuntime;
 use crate::config::settings::BmuxConfig;
-use crate::orchestration::message_bus::MessageBus;
+use crate::orchestration::message_bus::{MessageBus, MessageType, ResultPayload};
 use crate::orchestration::task_router::{self, TaskRouter};
+use crate::security::envelope::{harden_socket_permissions, SecurityEnvelope};
 use crate::storage::context_store::ContextStore;
 
 use super::{
@@ -37,9 +39,10 @@ use super::{
 struct DaemonState {
     session: Mutex<Session>,
     agents: Mutex<AgentRegistry>,
-
     context: ContextStore,
-    task_router: TaskRouter,
+    task_router: Arc<TaskRouter>,
+    envelope: Arc<SecurityEnvelope>,
+    bmux_config: BmuxConfig,
     session_name: String,
     ipc_socket_path: PathBuf,
 }
@@ -62,9 +65,16 @@ impl DaemonServer {
         let context = ContextStore::open(name, &ctx_path)
             .map_err(|e| anyhow::anyhow!("Failed to open context store: {e}"))?;
 
+        let bmux_config = BmuxConfig::load().unwrap_or_default();
         let bus = Arc::new(MessageBus::new(name)?);
         let ipc_socket_path = bus.socket_path().clone();
-        let task_router = TaskRouter::new(bus, 300);
+        let task_router = Arc::new(TaskRouter::new(bus, 300));
+        let envelope = Arc::new(SecurityEnvelope::new(
+            name,
+            std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+            bmux_config.security.clone(),
+            bmux_config.audit.enabled,
+        ));
 
         Ok(Self {
             name: name.to_string(),
@@ -73,6 +83,8 @@ impl DaemonServer {
                 agents: Mutex::new(AgentRegistry::new()),
                 context,
                 task_router,
+                envelope,
+                bmux_config,
                 session_name: name.to_string(),
                 ipc_socket_path,
             }),
@@ -85,7 +97,11 @@ impl DaemonServer {
         let _ = std::fs::remove_file(&self.socket_path);
 
         let listener = UnixListener::bind(&self.socket_path)?;
+        harden_socket_permissions(&self.socket_path)?;
         tracing::info!("Session '{}' listening on {:?}", self.name, self.socket_path);
+
+        self.state.task_router.message_bus().start().await?;
+        spawn_result_subscriber(Arc::clone(&self.state.task_router));
 
         self.write_meta().await?;
 
@@ -378,44 +394,38 @@ async fn handle_client_message(
                 }
             } // agents lock dropped here
 
-            let bmux_config = BmuxConfig::load().unwrap_or_default();
-            let settings_config = bmux_config
-                .agents
-                .get(&agent_type)
-                .unwrap_or_else(|| BmuxConfig::default_agent_config(&agent_type));
+            let runtime = AgentRuntime::new(
+                &state.bmux_config,
+                &state.envelope,
+                &state.ipc_socket_path,
+            );
 
-            let mut config = AgentConfig {
-                binary: settings_config.binary,
-                model: settings_config.model,
-                cost_per_1k_tokens: settings_config.cost_per_1k_tokens,
-                args: settings_config.args,
+            let config = if agent_type == "custom" {
+                match state.bmux_config.agents.get_custom(&name) {
+                    Some(s) => AgentConfig {
+                        binary: s.binary,
+                        model: model.clone().unwrap_or(s.model),
+                        cost_per_1k_tokens: s.cost_per_1k_tokens,
+                        args: s.args,
+                    },
+                    None => {
+                        let data = format!(
+                            "Custom agent '{}' not found in config.toml. Add [agents.{}] section.",
+                            name, name
+                        );
+                        return Ok(HandleResult::Reply(ServerMessage::QueryResult { data }));
+                    }
+                }
+            } else {
+                runtime.resolve_config(&agent_type, model.as_deref())
             };
-            if let Some(m) = model {
-                config.model = m.clone();
-            }
 
             if agent_type != "shell" && which::which(&config.binary).is_err() {
                 let data = format!("Error: Agent binary '{}' not found in PATH", config.binary);
                 return Ok(HandleResult::Reply(ServerMessage::QueryResult { data }));
             }
 
-            // Build shell command
-            let mut agent_cmd = String::new();
-            agent_cmd.push_str(&format!(
-                "export BMUX_SESSION='{}' BMUX_SOCKET='{}' BMUX_AGENT_NAME='{}'; ",
-                state.session_name,
-                state.ipc_socket_path.display(),
-                name,
-            ));
-            agent_cmd.push_str(&config.binary);
-            for arg in &config.args {
-                agent_cmd.push(' ');
-                agent_cmd.push_str(arg);
-            }
-            if !config.model.is_empty() && agent_type != "shell" {
-                agent_cmd.push_str(" --model ");
-                agent_cmd.push_str(&config.model);
-            }
+            let agent_cmd = runtime.build_launch_command(&name, &agent_type, &config);
 
             // Split window — session lock acquired and released in this block
             let pane_id = {
@@ -451,6 +461,8 @@ async fn handle_client_message(
                 capabilities: vec![],
                 idle_since: Some(std::time::Instant::now()),
             }).await;
+
+            let _ = state.envelope.log_agent_spawned(&name, &agent_type, &model_name);
 
             let data = format!(
                 "Agent '{}' spawned successfully (pane: {} [{}])\n\
@@ -513,59 +525,85 @@ async fn handle_client_message(
         }
 
         ClientMessage::AgentKill { name } => {
-            // TODO: close the agent's pane in the session
-            let mut reg = state.agents.lock().await;
-            let data = match reg.remove(&name) {
-                Ok(info) => {
-                    state.task_router.handle_agent_crash(&name).await;
-                    format!("Agent '{}' ({}) killed.", info.name, info.agent_type)
+            let (data, pane_id, agent_type) = {
+                let mut reg = state.agents.lock().await;
+                match reg.remove(&name) {
+                    Ok(info) => {
+                        let pane_id = info.pane_id;
+                        let agent_type = info.agent_type.clone();
+                        (
+                            format!("Agent '{}' ({}) killed.", info.name, info.agent_type),
+                            pane_id,
+                            agent_type,
+                        )
+                    }
+                    Err(e) => (format!("Error: {}", e), None, String::new()),
                 }
-                Err(e) => format!("Error: {}", e),
             };
+            if let Some(pane_id) = pane_id {
+                let mut sess = state.session.lock().await;
+                if let Err(e) = sess.kill_pane(pane_id) {
+                    tracing::warn!(agent = %name, pane = pane_id, "Failed to kill agent pane: {e}");
+                }
+            }
+            state.task_router.handle_agent_crash(&name).await;
+            if !agent_type.is_empty() {
+                let _ = state.envelope.log_agent_killed(&name, &agent_type);
+            }
             return Ok(HandleResult::Reply(ServerMessage::QueryResult { data }));
         }
 
         ClientMessage::TaskSend { agent, content, model } => {
             // Determine the target agent name (direct or auto-routed)
-            let (data, target_agent) = if let Some(ref agent_name) = agent {
+            let (data, target_agent, task_id) = if let Some(ref agent_name) = agent {
                 // Direct send to named agent
                 match state.task_router.send_to_agent(agent_name, &content, 1).await {
                     Ok(task_router::SendResult::Dispatched { task_id }) => {
                         (format!("Task dispatched → {agent_name} (task_id: {task_id})"),
-                         Some(agent_name.clone()))
+                         Some(agent_name.clone()),
+                         Some(task_id))
                     }
                     Ok(task_router::SendResult::Queued { task_id, agent_id, position }) => {
                         (format!("Agent '{agent_id}' busy — task queued (position: {position}, task_id: {task_id})"),
-                         None) // queued, don't deliver to PTY yet
+                         None,
+                         Some(task_id))
                     }
-                    Err(e) => (format!("Error: {e}"), None),
+                    Err(e) => (format!("Error: {e}"), None, None),
                 }
             } else {
                 // Auto-route to best available agent
                 match state.task_router.send_auto(&content, model.as_deref(), None).await {
                     Ok(task_router::AutoRouteResult::Dispatched { task_id, agent_id, estimated_cost }) => {
                         (format!("Task auto-routed → {agent_id} (cost: ${estimated_cost:.6}, task_id: {task_id})"),
-                         Some(agent_id))
+                         Some(agent_id),
+                         Some(task_id))
                     }
                     Ok(task_router::AutoRouteResult::AllBusy { task_id, timeout_seconds }) => {
                         (format!("All agents busy — queued (timeout: {timeout_seconds}s, task_id: {task_id})"),
-                         None)
+                         None,
+                         Some(task_id))
                     }
-                    Err(e) => (format!("Error: {e}"), None),
+                    Err(e) => (format!("Error: {e}"), None, None),
                 }
             };
 
-            // Deliver the task content to the agent's pane PTY stdin.
-            // Use \r (carriage return) to simulate pressing Enter in the terminal.
-            // PTYs treat \r as the Enter key, not \n.
+            if let (Some(target), Some(task_id)) = (&target_agent, &task_id) {
+                let _ = state.envelope.log_task_sent(target, task_id, &content);
+            }
+
+            // Deliver sanitized task content to the agent's pane PTY stdin.
             if let Some(target) = target_agent {
+                let input = match state.envelope.sanitize_task_content(&content) {
+                    Ok(bytes) => bytes,
+                    Err(e) => {
+                        let data = format!("Error: {e}");
+                        return Ok(HandleResult::Reply(ServerMessage::QueryResult { data }));
+                    }
+                };
                 let reg = state.agents.lock().await;
                 if let Some(info) = reg.get(&target) {
                     if let Some(pane_id) = info.pane_id {
                         let mut sess = state.session.lock().await;
-                        // Write content + carriage return (Enter key)
-                        let mut input = content.into_bytes();
-                        input.push(b'\r');
                         if let Err(e) = sess.send_input_to_pane(pane_id, &input) {
                             tracing::warn!(agent = %target, pane = pane_id, "Failed to deliver task to PTY: {e}");
                         }
@@ -623,7 +661,10 @@ async fn handle_client_message(
 
         ClientMessage::ContextSet { key, value } => {
             let data = match state.context.set(&key, &value, None) {
-                Ok(()) => format!("Set '{}'.", key),
+                Ok(()) => {
+                    let _ = state.envelope.log_context_set(&key, &value);
+                    format!("Set '{}'.", key)
+                }
                 Err(e) => format!("Error: {}", e),
             };
             return Ok(HandleResult::Reply(ServerMessage::QueryResult { data }));
@@ -666,4 +707,43 @@ async fn handle_client_message(
 
 fn build_snapshot(sess: &Session) -> SessionSnapshot {
     sess.snapshot()
+}
+
+/// Subscribe to IPC Result messages and advance the task lifecycle.
+fn spawn_result_subscriber(router: Arc<TaskRouter>) {
+    let mut rx = router.message_bus().subscribe();
+    tokio::spawn(async move {
+        loop {
+            match rx.recv().await {
+                Ok(msg) if msg.msg_type == MessageType::Result => {
+                    match serde_json::from_value::<ResultPayload>(msg.payload) {
+                        Ok(payload) => {
+                            let task_full_id = payload
+                                .task_id
+                                .clone()
+                                .unwrap_or_else(|| msg.id.clone());
+                            if let Err(e) = router.handle_result(&task_full_id, payload).await {
+                                tracing::warn!(
+                                    task_id = %task_full_id,
+                                    from = %msg.from,
+                                    "Failed to handle agent result: {e}"
+                                );
+                            }
+                        }
+                        Err(e) => {
+                            tracing::warn!(
+                                from = %msg.from,
+                                "Malformed Result payload: {e}"
+                            );
+                        }
+                    }
+                }
+                Ok(_) => {}
+                Err(broadcast::error::RecvError::Lagged(n)) => {
+                    tracing::warn!("MessageBus subscriber lagged by {n} messages");
+                }
+                Err(broadcast::error::RecvError::Closed) => break,
+            }
+        }
+    });
 }

@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::path::Path;
 
 /// Top-level BMUX configuration loaded from config.toml.
@@ -17,6 +18,10 @@ pub struct BmuxConfig {
     pub mouse_support: bool,
     /// Agent-related configuration
     pub agents: AgentsConfig,
+    /// Security controls (sandbox, dangerous CLI flags)
+    pub security: SecurityConfig,
+    /// Audit logging toggle
+    pub audit: AuditConfig,
 }
 
 impl Default for BmuxConfig {
@@ -27,7 +32,41 @@ impl Default for BmuxConfig {
             default_shell: std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string()),
             mouse_support: false,
             agents: AgentsConfig::default(),
+            security: SecurityConfig::default(),
+            audit: AuditConfig::default(),
         }
+    }
+}
+
+/// Security-related runtime policies.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SecurityConfig {
+    /// Filesystem sandbox mode: landlock | namespace | seatbelt | none
+    pub sandbox: String,
+    /// Opt-in: allow `--dangerously-skip-permissions` for claude-code (not recommended)
+    pub allow_dangerous_permissions: bool,
+}
+
+impl Default for SecurityConfig {
+    fn default() -> Self {
+        Self {
+            sandbox: "landlock".to_string(),
+            allow_dangerous_permissions: false,
+        }
+    }
+}
+
+/// Audit logging configuration.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AuditConfig {
+    pub enabled: bool,
+}
+
+impl Default for AuditConfig {
+    fn default() -> Self {
+        Self { enabled: true }
     }
 }
 
@@ -74,44 +113,19 @@ impl BmuxConfig {
 
     /// Return default agent config for a built-in agent type.
     pub fn default_agent_config(agent_type: &str) -> AgentSettingsConfig {
-        let (binary, model, cost, args) = match agent_type {
-            "claude-code" => ("claude", "claude-sonnet-4-20250514", 0.003,
-                vec!["--dangerously-skip-permissions".to_string()]),
-            "opencode" => ("opencode", "gemini-2.5-pro", 0.00125, vec![]),
-            "pi" => ("pi", "claude-sonnet-4-20250514", 0.003, vec![]),
-            "shell" => ("sh", "shell", 0.0, vec![]),
-            _ => ("", "unknown", 0.0, vec![]),
-        };
-        AgentSettingsConfig {
-            binary: binary.to_string(),
-            model: model.to_string(),
-            cost_per_1k_tokens: cost,
-            args,
-        }
+        crate::config::agent_catalog::resolve_agent_config(
+            agent_type,
+            &AgentsConfig::default(),
+            false,
+        )
     }
 
     /// Map of agent type names available (for workflow validation).
     pub fn agent_types(&self) -> std::collections::HashMap<String, AgentSettingsConfig> {
-        let mut map = std::collections::HashMap::new();
-        map.insert("claude-code".to_string(), AgentSettingsConfig {
-            binary: self.agents.claude_code.binary.clone(),
-            model: "claude-sonnet-4-20250514".to_string(),
-            cost_per_1k_tokens: 0.003,
-            args: vec!["--dangerously-skip-permissions".to_string()],
-        });
-        map.insert("opencode".to_string(), AgentSettingsConfig {
-            binary: self.agents.opencode.binary.clone(),
-            model: "gemini-2.5-pro".to_string(),
-            cost_per_1k_tokens: 0.00125,
-            args: vec![],
-        });
-        map.insert("pi".to_string(), AgentSettingsConfig {
-            binary: self.agents.pi.binary.clone(),
-            model: "claude-sonnet-4-20250514".to_string(),
-            cost_per_1k_tokens: 0.003,
-            args: vec![],
-        });
-        map
+        crate::config::agent_catalog::all_builtin_types(
+            &self.agents,
+            self.security.allow_dangerous_permissions,
+        )
     }
 
     /// Format config as a human-readable string for `bmux config show`.
@@ -135,6 +149,9 @@ pub struct AgentsConfig {
     pub claude_code: AgentBinaryConfig,
     pub opencode: AgentBinaryConfig,
     pub pi: AgentBinaryConfig,
+    /// User-defined agents: `[agents.<name>]` sections in config.toml.
+    #[serde(flatten)]
+    pub custom: HashMap<String, CustomAgentConfig>,
 }
 
 impl Default for AgentsConfig {
@@ -149,33 +166,59 @@ impl Default for AgentsConfig {
             pi: AgentBinaryConfig {
                 binary: "pi".to_string(),
             },
+            custom: HashMap::new(),
         }
     }
 }
 
 impl AgentsConfig {
-    /// Look up agent settings by type name or custom agent name.
-    pub fn get(&self, name: &str) -> Option<AgentSettingsConfig> {
-        match name {
-            "claude-code" => Some(AgentSettingsConfig {
-                binary: self.claude_code.binary.clone(),
-                model: "claude-sonnet-4-20250514".to_string(),
-                cost_per_1k_tokens: 0.003,
-                args: vec!["--dangerously-skip-permissions".to_string()],
-            }),
-            "opencode" => Some(AgentSettingsConfig {
-                binary: self.opencode.binary.clone(),
-                model: "gemini-2.5-pro".to_string(),
-                cost_per_1k_tokens: 0.00125,
-                args: vec![],
-            }),
-            "pi" => Some(AgentSettingsConfig {
-                binary: self.pi.binary.clone(),
-                model: "claude-sonnet-4-20250514".to_string(),
-                cost_per_1k_tokens: 0.003,
-                args: vec![],
-            }),
-            _ => None,
+    /// Look up built-in agent settings by type name.
+    pub fn get(&self, name: &str, allow_dangerous_permissions: bool) -> Option<AgentSettingsConfig> {
+        if crate::config::agent_catalog::builtin_spec(name).is_some() {
+            Some(crate::config::agent_catalog::resolve_agent_config(
+                name,
+                self,
+                allow_dangerous_permissions,
+            ))
+        } else {
+            None
+        }
+    }
+
+    /// Look up a user-defined custom agent by name (`[agents.<name>]`).
+    pub fn get_custom(&self, name: &str) -> Option<AgentSettingsConfig> {
+        self.custom.get(name).map(CustomAgentConfig::to_settings)
+    }
+}
+
+/// Full configuration for a user-defined custom agent.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct CustomAgentConfig {
+    pub binary: String,
+    pub model: String,
+    pub cost_per_1k_tokens: f64,
+    pub args: Vec<String>,
+}
+
+impl Default for CustomAgentConfig {
+    fn default() -> Self {
+        Self {
+            binary: String::new(),
+            model: "unknown".to_string(),
+            cost_per_1k_tokens: 0.0,
+            args: vec![],
+        }
+    }
+}
+
+impl CustomAgentConfig {
+    fn to_settings(&self) -> AgentSettingsConfig {
+        AgentSettingsConfig {
+            binary: self.binary.clone(),
+            model: self.model.clone(),
+            cost_per_1k_tokens: self.cost_per_1k_tokens,
+            args: self.args.clone(),
         }
     }
 }

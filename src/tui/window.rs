@@ -248,17 +248,19 @@ impl Window {
 
         // Highlight vertical borders when mouse hovers on them.
         // Draw a bright column where two panes share an edge.
-        if let (Some(hcol), Some(hrow)) = (self.hover_col, self.hover_row) {
-            if let Some((_left_id, _right_id, border_x)) = self.border_at(hcol, hrow) {
-                // Highlight the entire vertical border column
-                let border_style = Style::default()
-                    .fg(Color::Black)
-                    .bg(Color::Cyan);
-                for y in area.y..area.y + area.height {
-                    if border_x > 0 && border_x < area.x + area.width {
-                        let cell = &mut buf[(border_x - 1, y)];
-                        cell.set_style(border_style);
-                        cell.set_symbol("┃");
+        if self.is_hover_on_border() {
+            if let (Some(hcol), Some(_hrow)) = (self.hover_col, self.hover_row) {
+                if let Some((_left_id, _right_id, border_x)) = self.border_at(hcol, _hrow) {
+                    // Highlight the entire vertical border column
+                    let border_style = Style::default()
+                        .fg(Color::Black)
+                        .bg(Color::Cyan);
+                    for y in area.y..area.y + area.height {
+                        if border_x > 0 && border_x < area.x + area.width {
+                            let cell = &mut buf[(border_x - 1, y)];
+                            cell.set_style(border_style);
+                            cell.set_symbol("┃");
+                        }
                     }
                 }
             }
