@@ -28,7 +28,7 @@ BMUX is a terminal multiplexer that orchestrates multiple AI agent CLIs in share
 | Send task | `TaskRouter` dispatch → `TaskDispatchEvent` → sanitize → PTY stdin (audit on success) |
 | Task result | Agent IPC `Result` → `MessageBus` → subscriber → `TaskRouter::handle_result` → agent Idle + next queue |
 | Workflow step | `send_to_agent` → `wait_for_task` → store `result.content` in context (`author: workflow`) |
-| Context | `ContextStore` (per-session DB); writes record `author`; agent namespacing enforced; scrub + audit |
+| Context | `ContextStore` (per-session DB); writes record `author`; agent namespacing enforced via daemon `ContextSet`; scrub + audit |
 | Config | `agent_catalog` SSOT for builtins; `[agents.<name>]` for custom agents |
 
 ## Security layers
@@ -44,7 +44,7 @@ BMUX is a terminal multiplexer that orchestrates multiple AI agent CLIs in share
 
 | Module | Role |
 |--------|------|
-| `tui/` | Daemon, panes, protocol, client |
+| `tui/` | Daemon, panes, protocol, client (zoom/scroll/reload via snapshots) |
 | `agents/` | Adapters, registry, runtime, catalog |
 | `orchestration/` | MessageBus, TaskRouter |
 | `storage/` | Context, sessions, audit log |

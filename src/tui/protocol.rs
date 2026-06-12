@@ -91,6 +91,8 @@ pub struct SessionSnapshot {
     pub name: String,
     pub active_window: usize,
     pub windows: Vec<WindowSnapshot>,
+    #[serde(default)]
+    pub status_message: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -101,6 +103,10 @@ pub struct WindowSnapshot {
     pub pane_layouts: Vec<PaneLayout>,
     pub pane_cells: Vec<PaneSnapshot>,
     pub focused_pane: usize,
+    #[serde(default)]
+    pub zoomed: bool,
+    #[serde(default)]
+    pub scroll_active: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

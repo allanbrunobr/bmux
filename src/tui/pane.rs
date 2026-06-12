@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use portable_pty::{CommandBuilder, MasterPty, PtySize, native_pty_system};
-use super::protocol::{CellData, PaneSnapshot};
+use super::{protocol::{CellData, PaneSnapshot}, scroll::ScrollState};
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
@@ -29,6 +29,7 @@ pub struct Pane {
     child: Box<dyn portable_pty::Child + Send>,
     /// Set to `true` by the reader thread whenever new PTY output arrives.
     pub has_output: Arc<AtomicBool>,
+    scroll: Arc<Mutex<ScrollState>>,
 }
 
 impl Pane {
@@ -71,18 +72,33 @@ impl Pane {
 
         let parser = Arc::new(Mutex::new(vt100::Parser::new(rows, cols, 10_000)));
         let has_output = Arc::new(AtomicBool::new(false));
+        let scroll = Arc::new(Mutex::new(ScrollState::new()));
 
         {
             let parser_clone = Arc::clone(&parser);
             let flag_clone = Arc::clone(&has_output);
+            let scroll_clone = Arc::clone(&scroll);
             std::thread::Builder::new()
                 .name(format!("bmux-pty-reader-{id}"))
                 .spawn(move || {
                     let mut buf = [0u8; 4096];
+                    let mut line_buf: Vec<u8> = Vec::new();
                     loop {
                         match reader.read(&mut buf) {
                             Ok(0) | Err(_) => break,
                             Ok(n) => {
+                                for &byte in &buf[..n] {
+                                    if byte == b'\n' {
+                                        if !line_buf.is_empty() {
+                                            let line =
+                                                String::from_utf8_lossy(&line_buf).to_string();
+                                            scroll_clone.lock().unwrap().push_line(line);
+                                            line_buf.clear();
+                                        }
+                                    } else if byte != b'\r' {
+                                        line_buf.push(byte);
+                                    }
+                                }
                                 parser_clone.lock().unwrap().process(&buf[..n]);
                                 flag_clone.store(true, Ordering::Relaxed);
                             }
@@ -99,7 +115,35 @@ impl Pane {
             master: pair.master,
             child,
             has_output,
+            scroll,
         })
+    }
+
+    pub fn scroll_active(&self) -> bool {
+        self.scroll.lock().unwrap().is_active()
+    }
+
+    pub fn enter_scroll_mode(&self) {
+        self.scroll.lock().unwrap().enter();
+    }
+
+    pub fn exit_scroll_mode(&self) {
+        self.scroll.lock().unwrap().exit();
+    }
+
+    /// Handle scroll-mode keys. Returns true if the input was consumed.
+    pub fn handle_scroll_input(&self, bytes: &[u8]) -> bool {
+        let mut scroll = self.scroll.lock().unwrap();
+        if !scroll.is_active() {
+            return false;
+        }
+        match bytes {
+            b"k" | b"\x1b[A" | b"\x1bOA" => scroll.scroll_up(1),
+            b"j" | b"\x1b[B" | b"\x1bOB" => scroll.scroll_down(1),
+            b"q" | b"\x1b" => scroll.exit(),
+            _ => return false,
+        }
+        true
     }
 
     /// Child process ID when available from the PTY backend.
@@ -147,6 +191,10 @@ impl Pane {
 
     /// Render screen content into an already-computed inner rect (no borders).
     pub fn render_content(&self, buf: &mut Buffer, inner: Rect) {
+        if self.scroll.lock().unwrap().is_active() {
+            self.render_scroll_content(buf, inner);
+            return;
+        }
         let parser = self.parser.lock().unwrap();
         let screen = parser.screen();
         let (rows, cols) = screen.size();
@@ -226,8 +274,30 @@ impl Widget for PaneView<'_> {
 }
 
 impl Pane {
+    fn render_scroll_content(&self, buf: &mut Buffer, inner: Rect) {
+        let scroll = self.scroll.lock().unwrap();
+        let lines = scroll.visible_lines(inner.height as usize);
+        for (row, line) in lines.iter().enumerate() {
+            let y = inner.y + row as u16;
+            if y >= inner.y + inner.height {
+                break;
+            }
+            for (col, ch) in line.chars().take(inner.width as usize).enumerate() {
+                buf.set_string(
+                    inner.x + col as u16,
+                    y,
+                    ch.to_string(),
+                    Style::default(),
+                );
+            }
+        }
+    }
+
     /// Capture a serializable snapshot of the current screen state.
     pub fn snapshot(&self) -> PaneSnapshot {
+        if self.scroll.lock().unwrap().is_active() {
+            return self.snapshot_scroll();
+        }
         let parser = self.parser.lock().unwrap();
         let screen = parser.screen();
         let (rows, cols) = screen.size();
@@ -249,6 +319,31 @@ impl Pane {
             cells.push(row_cells);
         }
         PaneSnapshot { id: self.id, rows, cols, cells, cursor_row, cursor_col }
+    }
+
+    fn snapshot_scroll(&self) -> PaneSnapshot {
+        let scroll = self.scroll.lock().unwrap();
+        let rows = 24u16;
+        let cols = 80u16;
+        let lines = scroll.visible_lines(rows as usize);
+        let mut cells = Vec::with_capacity(rows as usize);
+        for r in 0..rows {
+            let mut row_cells = Vec::with_capacity(cols as usize);
+            let line = lines.get(r as usize).copied().unwrap_or("");
+            for c in 0..cols {
+                let ch = line.chars().nth(c as usize).unwrap_or(' ');
+                row_cells.push(CellData { ch, ..CellData::default() });
+            }
+            cells.push(row_cells);
+        }
+        PaneSnapshot {
+            id: self.id,
+            rows,
+            cols,
+            cells,
+            cursor_row: 0,
+            cursor_col: 0,
+        }
     }
 }  // end impl Pane (snapshot)
 

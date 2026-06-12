@@ -557,7 +557,7 @@ mod tests {
         let engine = WorkflowEngine::new(store);
 
         // Register stub agents so task dispatch succeeds
-        for name in &["a", "b", "c", "d"] {
+        for name in &["a", "b", "c", "d", "arch"] {
             engine.task_router.register_agent(AgentInfo {
                 id: name.to_string(),
                 agent_type: "claude-code".to_string(),
@@ -659,9 +659,9 @@ steps:
     }
 
     #[tokio::test]
-    #[ignore = "requires running message bus (integration test)"]
     async fn test_run_sequential_workflow_completes() {
         let (engine, _dir) = make_engine().await;
+        spawn_task_auto_completer(Arc::clone(&engine.task_router)).await;
         let yaml = r#"
 name: seq-test
 version: "1.0"
@@ -688,9 +688,9 @@ steps:
     }
 
     #[tokio::test]
-    #[ignore = "requires running message bus (integration test)"]
     async fn test_step_output_stored_in_context() {
         let (engine, _dir) = make_engine().await;
+        spawn_task_auto_completer(Arc::clone(&engine.task_router)).await;
         let yaml = r#"
 name: ctx-test
 version: "1.0"
@@ -721,9 +721,9 @@ steps:
     // ── Story 5.3: parallel execution ────────────────────────────────────────
 
     #[tokio::test]
-    #[ignore = "requires running message bus (integration test)"]
     async fn test_parallel_steps_both_complete() {
         let (engine, _dir) = make_engine().await;
+        spawn_task_auto_completer(Arc::clone(&engine.task_router)).await;
         let yaml = r#"
 name: parallel-test
 version: "1.0"
@@ -757,9 +757,9 @@ steps:
     }
 
     #[tokio::test]
-    #[ignore = "requires running message bus (integration test)"]
     async fn test_diamond_dag_a_bc_d() {
         let (engine, _dir) = make_engine().await;
+        spawn_task_auto_completer(Arc::clone(&engine.task_router)).await;
         let yaml = r#"
 name: diamond
 version: "1.0"
@@ -792,9 +792,9 @@ steps:
     // ── Story 5.4: status & monitoring ───────────────────────────────────────
 
     #[tokio::test]
-    #[ignore = "requires running message bus (integration test)"]
     async fn test_get_status_after_completion() {
         let (engine, _dir) = make_engine().await;
+        spawn_task_auto_completer(Arc::clone(&engine.task_router)).await;
         let yaml = r#"
 name: status-test
 version: "1.0"
@@ -816,9 +816,9 @@ steps:
     }
 
     #[tokio::test]
-    #[ignore = "requires running message bus (integration test)"]
     async fn test_get_status_shows_step_details() {
         let (engine, _dir) = make_engine().await;
+        spawn_task_auto_completer(Arc::clone(&engine.task_router)).await;
         let yaml = r#"
 name: detail-test
 version: "1.0"
