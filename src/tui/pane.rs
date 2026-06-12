@@ -35,7 +35,16 @@ impl Pane {
     /// Spawn a new pane running `$SHELL` (or `/bin/sh` as fallback).
     pub fn new(id: usize, rows: u16, cols: u16) -> Result<Self> {
         let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
+        Self::spawn_with_command(id, rows, cols, CommandBuilder::new(&shell))
+    }
 
+    /// Spawn a pane with a pre-built command (structured agent spawn — no shell injection).
+    pub fn spawn_with_command(
+        id: usize,
+        rows: u16,
+        cols: u16,
+        cmd: CommandBuilder,
+    ) -> Result<Self> {
         let pty_system = native_pty_system();
         let pair = pty_system
             .openpty(PtySize {
@@ -46,11 +55,10 @@ impl Pane {
             })
             .context("Failed to open PTY")?;
 
-        let cmd = CommandBuilder::new(&shell);
         let child = pair
             .slave
             .spawn_command(cmd)
-            .context("Failed to spawn shell")?;
+            .context("Failed to spawn command in PTY")?;
 
         let writer = pair
             .master
@@ -64,7 +72,6 @@ impl Pane {
         let parser = Arc::new(Mutex::new(vt100::Parser::new(rows, cols, 10_000)));
         let has_output = Arc::new(AtomicBool::new(false));
 
-        // Background thread: read raw bytes from PTY, feed to vt100 parser.
         {
             let parser_clone = Arc::clone(&parser);
             let flag_clone = Arc::clone(&has_output);
@@ -93,6 +100,11 @@ impl Pane {
             child,
             has_output,
         })
+    }
+
+    /// Child process ID when available from the PTY backend.
+    pub fn process_id(&self) -> Option<u32> {
+        self.child.process_id()
     }
 
     /// Send raw input bytes to the PTY (keyboard input forwarding).

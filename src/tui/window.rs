@@ -1,4 +1,5 @@
 use anyhow::Result;
+use portable_pty::CommandBuilder;
 use ratatui::{buffer::Buffer, layout::Rect};
 
 use ratatui::widgets::Widget;
@@ -67,6 +68,19 @@ impl Window {
             .split_h(self.focused_pane, new_id);
         self.focused_pane = new_id;
         Ok(())
+    }
+
+    /// Split horizontally and spawn a command in the new pane (structured agent spawn).
+    pub fn split_horizontal_with_command(&mut self, cmd: CommandBuilder) -> Result<usize> {
+        let (rows, cols) = self.focused_inner_size();
+        let new_id = self.next_pane_id;
+        self.next_pane_id += 1;
+        let pane = Pane::spawn_with_command(new_id, rows, cols / 2, cmd)?;
+        self.panes.push(pane);
+        self.layout = std::mem::replace(&mut self.layout, Layout::new(0))
+            .split_h(self.focused_pane, new_id);
+        self.focused_pane = new_id;
+        Ok(new_id)
     }
 
     /// Split the currently focused pane vertically (top / bottom).

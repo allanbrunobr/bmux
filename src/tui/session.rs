@@ -1,5 +1,6 @@
 use anyhow::Result;
 use chrono::{DateTime, Utc};
+use portable_pty::CommandBuilder;
 use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout as RatatuiLayout},
@@ -89,6 +90,15 @@ impl Session {
         win.send_input_to_pane(new_pane_id, cmd_bytes.as_bytes())?;
 
         Ok(new_pane_id)
+    }
+
+    /// Split horizontally and spawn a structured PTY command (no shell line injection).
+    /// Returns `(pane_id, child_pid)`.
+    pub fn split_and_spawn_agent(&mut self, cmd: CommandBuilder) -> Result<(usize, Option<u32>)> {
+        let win = &mut self.windows[self.active_window];
+        let pane_id = win.split_horizontal_with_command(cmd)?;
+        let pid = win.pane_mut(pane_id).and_then(|p| p.process_id());
+        Ok((pane_id, pid))
     }
 
     // ── Story 1.4: Window management ─────────────────────────────────────────
