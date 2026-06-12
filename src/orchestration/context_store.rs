@@ -55,6 +55,11 @@ impl SharedContextStore {
         })
     }
 
+    /// Wrap an existing `Arc<ContextStore>` (daemon wiring).
+    pub fn from_arc(inner: Arc<ContextStore>) -> Self {
+        Self { inner }
+    }
+
     // ─── Agent output helpers (Story 4.2) ────────────────────────────────────
 
     /// Store an agent's last output at `agent:{id}:last_output` with TTL of 1 hour.
@@ -73,6 +78,16 @@ impl SharedContextStore {
 
     pub fn set(&self, key: &str, value: &str, ttl_seconds: Option<u64>) -> Result<(), ContextStoreError> {
         self.inner.set(key, value, ttl_seconds)
+    }
+
+    pub fn set_with_author(
+        &self,
+        key: &str,
+        value: &str,
+        ttl_seconds: Option<u64>,
+        author: &str,
+    ) -> Result<(), ContextStoreError> {
+        self.inner.set_with_author(key, value, ttl_seconds, author)
     }
 
     pub fn get(&self, key: &str) -> Result<Option<String>, ContextStoreError> {

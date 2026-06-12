@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixStream;
+use tokio::time::{timeout, Duration};
 
 use super::protocol::{ClientMessage, ServerMessage};
 use super::session::{list_sessions, socket_path};
@@ -61,7 +62,15 @@ pub fn resolve_session(explicit: Option<&str>) -> Result<PathBuf> {
 ///
 /// Opens a new connection, sends one `ClientMessage`, reads one `ServerMessage`,
 /// then closes. This is intentionally short-lived — CLI commands are fire-and-forget.
+const QUERY_TIMEOUT: Duration = Duration::from_secs(5);
+
 pub async fn query(sock_path: &Path, msg: ClientMessage) -> Result<String> {
+    timeout(QUERY_TIMEOUT, query_inner(sock_path, msg))
+        .await
+        .map_err(|_| anyhow::anyhow!("Session query timed out after {}s", QUERY_TIMEOUT.as_secs()))?
+}
+
+async fn query_inner(sock_path: &Path, msg: ClientMessage) -> Result<String> {
     let stream = UnixStream::connect(sock_path)
         .await
         .with_context(|| format!("Cannot connect to session at {}", sock_path.display()))?;
@@ -69,13 +78,11 @@ pub async fn query(sock_path: &Path, msg: ClientMessage) -> Result<String> {
     let (reader, mut writer) = stream.into_split();
     let mut reader = BufReader::new(reader);
 
-    // Send query
     let json = serde_json::to_string(&msg)?;
     writer.write_all(json.as_bytes()).await?;
     writer.write_all(b"\n").await?;
     writer.flush().await?;
 
-    // Read response
     let mut line = String::new();
     reader.read_line(&mut line).await?;
 

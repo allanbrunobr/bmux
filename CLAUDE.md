@@ -40,8 +40,9 @@ bmux task list -s $BMUX_SESSION
 2. WORK: complete your task
 3. PUBLISH: share your result with a meaningful key
    bmux context set "design:auth" "JWT RS256 with refresh tokens" -s $BMUX_SESSION
-4. DELEGATE: if another agent should act on your result
-   bmux task send testador -s $BMUX_SESSION -- "Implement tests for: $(bmux context get 'design:auth' -s $BMUX_SESSION)"
+4. DELEGATE: if another agent should act on your result (read context first, pass as literal text — never shell-interpolate)
+   bmux context get "design:auth" -s $BMUX_SESSION
+   bmux task send testador -s $BMUX_SESSION -- "Implement tests for the auth design you read from context"
 5. DONE: publish completion status
    bmux context set "status:arquiteto" "done" -s $BMUX_SESSION
 

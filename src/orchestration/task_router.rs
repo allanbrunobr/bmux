@@ -310,6 +310,9 @@ impl TaskRouter {
                 agent_status
                     .get(&a.id)
                     .map_or(true, |s| *s == AgentState::Idle)
+                    && max_cost_usd.map_or(true, |max| {
+                        a.cost_per_1k_tokens * 0.001 <= max
+                    })
             })
             .collect();
 
@@ -463,10 +466,42 @@ impl TaskRouter {
 
         info!(task_id = %task_id, agent = %agent_id, "Task completed, agent returned to idle");
 
+        self.prune_terminal_tasks(500).await;
+
         // Dispatch next queued task for this agent if any
         self.dispatch_next_for_agent(&agent_id).await?;
 
         Ok(())
+    }
+
+    /// Drop oldest terminal tasks when the store exceeds `retain` entries.
+    pub async fn prune_terminal_tasks(&self, retain: usize) {
+        let mut tasks = self.tasks.write().await;
+        let terminal: Vec<String> = tasks
+            .values()
+            .filter(|t| {
+                matches!(
+                    t.status,
+                    TaskStatus::Completed
+                        | TaskStatus::Failed
+                        | TaskStatus::Cancelled
+                        | TaskStatus::TimedOut
+                )
+            })
+            .map(|t| t.id.clone())
+            .collect();
+        if terminal.len() <= retain {
+            return;
+        }
+        let mut by_time: Vec<_> = terminal
+            .iter()
+            .filter_map(|id| tasks.get(id).map(|t| (id.clone(), t.submitted_at)))
+            .collect();
+        by_time.sort_by_key(|(_, ts)| *ts);
+        let remove_count = by_time.len().saturating_sub(retain);
+        for (id, _) in by_time.into_iter().take(remove_count) {
+            tasks.remove(&id);
+        }
     }
 
     /// Mark the agent's active task failed when PTY delivery fails; return agent to Idle.
@@ -1115,6 +1150,65 @@ mod tests {
         let _ast = bus.agent_status();
         let map = _ast.read().await;
         assert_eq!(map.get("arch"), Some(&AgentState::Idle));
+
+        bus.stop();
+    }
+
+    #[tokio::test]
+    async fn test_auto_route_respects_max_cost() {
+        let (bus, router) = make_router().await;
+        router
+            .register_agent(make_agent("cheap", "haiku", 0.0005, vec![]))
+            .await;
+        router
+            .register_agent(make_agent("expensive", "opus", 0.015, vec![]))
+            .await;
+
+        let result = router
+            .send_auto("task", None, Some(0.000001))
+            .await
+            .unwrap();
+
+        match result {
+            AutoRouteResult::Dispatched { agent_id, .. } => {
+                assert_eq!(agent_id, "cheap");
+            }
+            _ => panic!("expected dispatch to cheap agent"),
+        }
+
+        bus.stop();
+    }
+
+    #[tokio::test]
+    async fn test_prune_terminal_tasks_retains_recent() {
+        let (bus, router) = make_router().await;
+        router.register_agent(make_agent("arch", "sonnet", 0.003, vec![])).await;
+
+        for i in 0..5 {
+            let send = router.send_to_agent("arch", &format!("task {i}"), 1).await.unwrap();
+            let task_id = match send {
+                SendResult::Dispatched { task_id } => task_id,
+                _ => panic!("expected dispatch"),
+            };
+            let full_id = router.task_status(&task_id).await.unwrap().full_id;
+            router
+                .handle_result(
+                    &full_id,
+                    ResultPayload {
+                        content: "done".into(),
+                        tokens_used: 1,
+                        cost_usd: 0.0,
+                        duration_ms: 1,
+                        task_id: Some(full_id.clone()),
+                    },
+                )
+                .await
+                .unwrap();
+        }
+
+        router.prune_terminal_tasks(2).await;
+        let remaining = router.list_tasks().await;
+        assert_eq!(remaining.len(), 2);
 
         bus.stop();
     }

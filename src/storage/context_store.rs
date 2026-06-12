@@ -19,6 +19,8 @@ pub enum ContextStoreError {
     Serde(#[from] serde_json::Error),
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
+    #[error("write denied: {0}")]
+    WriteDenied(String),
 }
 
 pub type Result<T> = std::result::Result<T, ContextStoreError>;
@@ -32,6 +34,9 @@ pub struct StoredEntry {
     pub created_at: u64,
     /// Optional Unix timestamp (seconds) when this entry expires.
     pub expires_at: Option<u64>,
+    /// Who wrote this entry (agent name, cli, workflow, etc.).
+    #[serde(default)]
+    pub author: Option<String>,
 }
 
 /// A context entry as returned to callers (includes the key).
@@ -41,6 +46,8 @@ pub struct ContextEntry {
     pub value: String,
     pub created_at: u64,
     pub expires_at: Option<u64>,
+    #[serde(default)]
+    pub author: Option<String>,
 }
 
 /// The main context store handle.
@@ -82,13 +89,42 @@ impl ContextStore {
 
     // ─── public API ──────────────────────────────────────────────────────────
 
+    /// Validate that `author` may write `key` (agent namespacing).
+    pub fn validate_write(key: &str, author: &str) -> std::result::Result<(), ContextStoreError> {
+        if let Some(rest) = key.strip_prefix("agent:") {
+            let owner = rest.split(':').next().unwrap_or("");
+            if !owner.is_empty()
+                && author != owner
+                && !matches!(author, "cli" | "daemon" | "orchestrator" | "workflow")
+            {
+                return Err(ContextStoreError::WriteDenied(format!(
+                    "key '{key}' is namespaced to agent '{owner}' (writer: '{author}')"
+                )));
+            }
+        }
+        Ok(())
+    }
+
     /// Store a key-value pair with optional TTL (in seconds).
     pub fn set(&self, key: &str, value: &str, ttl_seconds: Option<u64>) -> Result<()> {
+        self.set_with_author(key, value, ttl_seconds, "cli")
+    }
+
+    /// Store with provenance (author recorded in the entry).
+    pub fn set_with_author(
+        &self,
+        key: &str,
+        value: &str,
+        ttl_seconds: Option<u64>,
+        author: &str,
+    ) -> Result<()> {
+        Self::validate_write(key, author)?;
         let now = Self::now_secs();
         let entry = StoredEntry {
             value: value.to_string(),
             created_at: now,
             expires_at: ttl_seconds.map(|t| now + t),
+            author: Some(author.to_string()),
         };
         let encoded = serde_json::to_vec(&entry)?;
         self.db.insert(self.sled_key(key), encoded)?;
@@ -163,6 +199,7 @@ impl ContextStore {
                     value: entry.value,
                     created_at: entry.created_at,
                     expires_at: entry.expires_at,
+                    author: entry.author,
                 });
             }
         }
@@ -279,6 +316,32 @@ mod tests {
     
     #[serial]
     #[test]
+    fn test_agent_namespace_write_denied_for_other_agent() {
+        let (store, _dir) = make_store();
+        assert!(store
+            .set_with_author("agent:arch:notes", "x", None, "testador")
+            .is_err());
+        assert!(store
+            .set_with_author("agent:arch:notes", "ok", None, "arch")
+            .is_ok());
+        assert!(store
+            .set_with_author("agent:arch:notes", "cli ok", None, "cli")
+            .is_ok());
+    }
+
+    #[serial]
+    #[test]
+    fn test_set_with_author_recorded_in_dump() {
+        let (store, _dir) = make_store();
+        store
+            .set_with_author("design:auth", "jwt", None, "arch")
+            .unwrap();
+        let entries = store.dump().unwrap();
+        assert_eq!(entries[0].author.as_deref(), Some("arch"));
+    }
+
+    #[serial]
+    #[test]
     fn test_delete_removes_entry() {
         let (store, _dir) = make_store();
         store.set("to-delete", "val", None).unwrap();
@@ -300,6 +363,7 @@ mod tests {
             value: "expired".to_string(),
             created_at: 1000,
             expires_at: Some(1001), // already expired (epoch 1001)
+            author: None,
         };
         let sled_key = store.sled_key("exp-key");
         store.db.insert(sled_key, serde_json::to_vec(&entry).unwrap()).unwrap();
@@ -320,6 +384,7 @@ mod tests {
             value: "gone".to_string(),
             created_at: 1000,
             expires_at: Some(1001),
+            author: None,
         };
         store.db.insert(store.sled_key("expired-key"), serde_json::to_vec(&expired).unwrap()).unwrap();
 
@@ -342,6 +407,7 @@ mod tests {
             value: "gone".to_string(),
             created_at: 1000,
             expires_at: Some(1001),
+            author: None,
         };
         store.db.insert(store.sled_key("e1"), serde_json::to_vec(&expired).unwrap()).unwrap();
         store.db.insert(store.sled_key("e2"), serde_json::to_vec(&expired).unwrap()).unwrap();
