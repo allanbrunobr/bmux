@@ -344,7 +344,7 @@ impl WorkflowEngine {
                             } else {
                                 (String::new(), 0.0)
                             };
-                            let _ = ctx.set(&output_key, &output_str, None);
+                            let _ = ctx.set_with_author(&output_key, &output_str, None, "workflow");
 
                             let mut r = run_clone.lock().unwrap();
                             if let Some(rec) = r.steps.iter_mut().find(|s| s.step_id == step.id) {
@@ -440,7 +440,8 @@ impl WorkflowEngine {
     fn save_run(&self, run_id: &str, run: &WorkflowRun) -> Result<()> {
         let key = format!("workflow_run:{run_id}");
         let json = serde_json::to_string(run)?;
-        self.context_store.set(&key, &json, None)?;
+        self.context_store
+            .set_with_author(&key, &json, None, "workflow")?;
         Ok(())
     }
 }
@@ -518,6 +519,32 @@ mod tests {
     use super::*;
     use tempfile::TempDir;
     use serial_test::serial;
+
+    /// Auto-complete active tasks (simulates agent IPC results in integration tests).
+    async fn spawn_task_auto_completer(router: Arc<TaskRouter>) {
+        use crate::orchestration::message_bus::ResultPayload;
+        use crate::orchestration::task_router::TaskStatus;
+
+        let r = Arc::clone(&router);
+        tokio::spawn(async move {
+            loop {
+                for task in r.list_tasks().await {
+                    if task.status != TaskStatus::Active {
+                        continue;
+                    }
+                    let payload = ResultPayload {
+                        content: format!("mock output for {}", task.id),
+                        tokens_used: 42,
+                        cost_usd: 0.002,
+                        duration_ms: 50,
+                        task_id: Some(task.full_id.clone()),
+                    };
+                    let _ = r.handle_result(&task.full_id, payload).await;
+                }
+                tokio::time::sleep(Duration::from_millis(25)).await;
+            }
+        });
+    }
 
     async fn make_engine() -> (WorkflowEngine, TempDir) {
         use crate::orchestration::task_router::AgentInfo;
@@ -598,6 +625,38 @@ mod tests {
     }
 
     // ── Story 5.2: sequential execution ──────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_single_step_waits_for_task_result() {
+        let (engine, _dir) = make_engine().await;
+        spawn_task_auto_completer(Arc::clone(&engine.task_router)).await;
+
+        let yaml = r#"
+name: one-step
+version: "1.0"
+agents:
+  a:
+    type: claude-code
+steps:
+  - id: design
+    agent: a
+    prompt: "Design feature"
+    timeout_seconds: 10
+"#;
+        let dag = make_dag_from_yaml(yaml);
+        let run = engine.run(&dag, "run-one", HashMap::new()).await.unwrap();
+        assert_eq!(run.status, WorkflowRunStatus::Completed);
+        let step = run.steps.iter().find(|s| s.step_id == "design").unwrap();
+        assert_eq!(step.status, StepStatus::Completed);
+        assert!(step.cost_usd.unwrap_or(0.0) > 0.0);
+
+        let output = engine
+            .context_store
+            .get("workflow:run-one:design:output")
+            .unwrap()
+            .unwrap();
+        assert!(output.contains("mock output"));
+    }
 
     #[tokio::test]
     #[ignore = "requires running message bus (integration test)"]

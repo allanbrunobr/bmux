@@ -387,7 +387,11 @@ async fn cmd_context(session: Option<&str>, action: ContextCommands) -> Result<(
     let sock = resolve_session(session)?;
 
     let msg = match action {
-        ContextCommands::Set { key, value } => ClientMessage::ContextSet { key, value },
+        ContextCommands::Set { key, value } => ClientMessage::ContextSet {
+            key,
+            value,
+            author: None,
+        },
         ContextCommands::Get { key } => ClientMessage::ContextGet { key },
         ContextCommands::List => ClientMessage::ContextList,
         ContextCommands::Dump => ClientMessage::ContextDump,

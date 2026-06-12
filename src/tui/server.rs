@@ -114,6 +114,13 @@ impl DaemonServer {
         spawn_result_subscriber(Arc::clone(&self.state.task_router));
         spawn_task_dispatch_subscriber(Arc::clone(&self.state));
 
+        {
+            let store = crate::orchestration::context_store::SharedContextStore::from_arc(
+                Arc::clone(&self.state.context),
+            );
+            tokio::spawn(crate::orchestration::context_store::run_cleanup_task(store));
+        }
+
         self.write_meta().await?;
 
         let (tx, _) = broadcast::channel::<Arc<ServerMessage>>(32);
@@ -649,11 +656,16 @@ async fn handle_client_message(
             return Ok(HandleResult::Reply(ServerMessage::QueryResult { data }));
         }
 
-        ClientMessage::ContextSet { key, value } => {
-            let data = match state.context.set(&key, &value, None) {
+        ClientMessage::ContextSet { key, value, author } => {
+            let writer = author.as_deref().unwrap_or("cli");
+            let scrubbed = state.envelope.scrub(&value);
+            let data = match state
+                .context
+                .set_with_author(&key, &scrubbed, None, writer)
+            {
                 Ok(()) => {
-                    let _ = state.envelope.log_context_set(&key, &value);
-                    format!("Set '{}'.", key)
+                    let _ = state.envelope.log_context_set(&key, &scrubbed);
+                    format!("Set '{}' (author: {}).", key, writer)
                 }
                 Err(e) => format!("Error: {}", e),
             };

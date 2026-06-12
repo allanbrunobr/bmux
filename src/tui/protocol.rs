@@ -45,7 +45,13 @@ pub enum ClientMessage {
     /// Get task status.
     TaskStatus { id: String },
     /// Set a context key-value pair.
-    ContextSet { key: String, value: String },
+    ContextSet {
+        key: String,
+        value: String,
+        /// Optional writer identity (defaults to "cli" in the daemon).
+        #[serde(default)]
+        author: Option<String>,
+    },
     /// Get a context value.
     ContextGet { key: String },
     /// List all context keys.

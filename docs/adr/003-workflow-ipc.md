@@ -17,7 +17,8 @@
 ## Consequences
 
 - Positive: CLI and daemon share one task router and context store per session.
-- Negative: workflow steps still use stub output until agents publish real IPC results (engine limitation).
+- Negative: workflow steps depend on agents publishing IPC `Result` messages; without a live agent the step times out.
+- Update (2026-06-12): engine calls `wait_for_task` and stores `result.content` with real cost.
 
 ## Compliance
 
