@@ -8,6 +8,7 @@ use super::{
     layout::{Layout, ResizeDir},
     pane::Pane,
     protocol::{PaneLayout, WindowSnapshot},
+    zoom::ZoomState,
 };
 
 /// A window holds one or more panes arranged in a BSP layout.
@@ -29,6 +30,7 @@ pub struct Window {
     /// Current mouse hover position (for border highlight).
     hover_col: Option<u16>,
     hover_row: Option<u16>,
+    zoom: ZoomState,
 }
 
 impl Window {
@@ -48,7 +50,41 @@ impl Window {
             last_area: Rect::new(0, 0, cols, rows),
             hover_col: None,
             hover_row: None,
+            zoom: ZoomState::new(),
         })
+    }
+
+    pub fn is_zoomed(&self) -> bool {
+        self.zoom.is_zoomed()
+    }
+
+    pub fn zoom_state(&self) -> ZoomState {
+        self.zoom.clone()
+    }
+
+    pub fn scroll_active(&self) -> bool {
+        self.pane_ref(self.focused_pane)
+            .map(|p| p.scroll_active())
+            .unwrap_or(false)
+    }
+
+    pub fn toggle_zoom(&mut self) {
+        self.zoom.toggle(self.focused_pane);
+    }
+
+    pub fn enter_scroll_mode(&mut self) {
+        if let Some(pane) = self.pane_mut(self.focused_pane) {
+            pane.enter_scroll_mode();
+        }
+    }
+
+    /// Returns true when input was consumed by scroll mode.
+    pub fn handle_scroll_input(&self, bytes: &[u8]) -> bool {
+        if let Some(pane) = self.pane_ref(self.focused_pane) {
+            pane.handle_scroll_input(bytes)
+        } else {
+            false
+        }
     }
 
     pub fn focused_pane_id(&self) -> usize {
@@ -252,11 +288,22 @@ impl Window {
         use ratatui::style::{Color, Style};
 
         self.last_area = area;
-        let rects = self.layout.compute_rects(area);
-        for (pane_id, rect) in &rects {
-            let focused = *pane_id == self.focused_pane;
-            if let Some(pane) = self.pane_ref(*pane_id) {
-                pane.view(focused).render(*rect, buf);
+
+        if self.zoom.is_zoomed() {
+            let pane_id = self.zoom.zoomed_pane_id().unwrap_or(self.focused_pane);
+            if let Some(pane) = self.pane_ref(pane_id) {
+                pane.view(true).render(area, buf);
+            }
+        } else {
+            let rects = self.layout.compute_rects(area);
+            for (pane_id, rect) in &rects {
+                if !self.zoom.is_pane_visible(*pane_id) {
+                    continue;
+                }
+                let focused = *pane_id == self.focused_pane;
+                if let Some(pane) = self.pane_ref(*pane_id) {
+                    pane.view(focused).render(*rect, buf);
+                }
             }
         }
 
@@ -285,18 +332,52 @@ impl Window {
 
     /// Capture a serializable snapshot for the daemon protocol.
     pub fn snapshot(&self) -> WindowSnapshot {
-        let rects = self.layout.compute_rects(self.last_area);
-        let pane_layouts: Vec<PaneLayout> = rects
-            .iter()
-            .map(|(id, r)| PaneLayout { id: *id, x: r.x, y: r.y, width: r.width, height: r.height })
-            .collect();
-        let pane_cells = self.panes.iter().map(|p| p.snapshot()).collect();
+        let (pane_layouts, pane_cells) = if self.zoom.is_zoomed() {
+            let pane_id = self.zoom.zoomed_pane_id().unwrap_or(self.focused_pane);
+            let area = self.last_area;
+            let layouts = vec![PaneLayout {
+                id: pane_id,
+                x: area.x,
+                y: area.y,
+                width: area.width,
+                height: area.height,
+            }];
+            let cells = self
+                .panes
+                .iter()
+                .filter(|p| p.id == pane_id)
+                .map(|p| p.snapshot())
+                .collect();
+            (layouts, cells)
+        } else {
+            let rects = self.layout.compute_rects(self.last_area);
+            let layouts: Vec<PaneLayout> = rects
+                .iter()
+                .filter(|(id, _)| self.zoom.is_pane_visible(*id))
+                .map(|(id, r)| PaneLayout {
+                    id: *id,
+                    x: r.x,
+                    y: r.y,
+                    width: r.width,
+                    height: r.height,
+                })
+                .collect();
+            let cells: Vec<_> = self
+                .panes
+                .iter()
+                .filter(|p| self.zoom.is_pane_visible(p.id))
+                .map(|p| p.snapshot())
+                .collect();
+            (layouts, cells)
+        };
         WindowSnapshot {
             id: self.id,
             name: self.name.clone(),
             pane_layouts,
             pane_cells,
             focused_pane: self.focused_pane,
+            zoomed: self.zoom.is_zoomed(),
+            scroll_active: self.scroll_active(),
         }
     }
 

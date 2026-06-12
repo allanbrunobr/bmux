@@ -115,7 +115,7 @@ fn handle_event(
                 handle_action(act, session, running, rows, cols)?;
             } else if pass_to_pty {
                 let bytes = key_event_to_bytes(key);
-                if !bytes.is_empty() {
+                if !bytes.is_empty() && !session.handle_scroll_input(&bytes) {
                     session.send_input(&bytes)?;
                 }
             }
@@ -195,14 +195,14 @@ fn handle_action(
         Action::PrevWindow => session.prev_window(),
         Action::SwitchWindow(n) => session.switch_to_window(n),
         Action::FocusNextPane => session.active_window().focus_next_pane(),
-        Action::ToggleZoom => { /* TODO: integrate ZoomState with Window */ }
-        Action::EnterScrollMode => { /* TODO: integrate ScrollState with Pane */ }
+        Action::ToggleZoom => session.toggle_zoom(),
+        Action::EnterScrollMode => session.enter_scroll_mode(),
         Action::ReloadConfig => {
-            // Story 1.8: hot reload config.toml
             let path = crate::config::default_config_path();
+            use crate::tui::status_bar::StatusMessage;
             match crate::config::settings::BmuxConfig::hot_reload(&path) {
-                Ok(_cfg) => { /* TODO: apply new config, show "Config reloaded" in status bar */ }
-                Err(_e) => { /* TODO: show "Config error: {e}" in status bar */ }
+                Ok(_cfg) => session.set_status_flash(StatusMessage::ConfigReloaded),
+                Err(e) => session.set_status_flash(StatusMessage::ConfigError(e.to_string())),
             }
         }
     }

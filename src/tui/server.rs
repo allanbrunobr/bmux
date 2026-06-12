@@ -8,7 +8,12 @@
 /// - Broadcasts screen-state updates to all connected TUI clients
 /// - Handles CLI query messages (agent list, task send, context get, etc.)
 use anyhow::Result;
-use std::{collections::HashMap, path::PathBuf, sync::Arc, time::Duration};
+use std::{
+    collections::HashMap,
+    path::PathBuf,
+    sync::{Arc, Mutex as StdMutex},
+    time::Duration,
+};
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
     net::{UnixListener, UnixStream},
@@ -45,7 +50,7 @@ struct DaemonState {
     task_router: Arc<TaskRouter>,
     workflow_engine: Arc<WorkflowEngine>,
     envelope: Arc<SecurityEnvelope>,
-    bmux_config: BmuxConfig,
+    bmux_config: StdMutex<BmuxConfig>,
     session_name: String,
     ipc_socket_path: PathBuf,
 }
@@ -94,7 +99,7 @@ impl DaemonServer {
                 task_router,
                 workflow_engine,
                 envelope,
-                bmux_config,
+                bmux_config: StdMutex::new(bmux_config),
                 session_name: name.to_string(),
                 ipc_socket_path,
             }),
@@ -347,7 +352,10 @@ async fn handle_client_message(
             state.session.lock().await.resize(rows, cols)?;
         }
         ClientMessage::Input { data } => {
-            state.session.lock().await.send_input(&data)?;
+            let mut sess = state.session.lock().await;
+            if !sess.handle_scroll_input(&data) {
+                sess.send_input(&data)?;
+            }
         }
         ClientMessage::Action { action } => {
             let mut sess = state.session.lock().await;
@@ -368,11 +376,20 @@ async fn handle_client_message(
                 Action::PrevWindow => sess.prev_window(),
                 Action::SwitchWindow(n) => sess.switch_to_window(n),
                 Action::FocusNextPane => sess.active_window().focus_next_pane(),
-                Action::ToggleZoom => { /* TODO: integrate ZoomState */ }
-                Action::EnterScrollMode => { /* TODO: integrate ScrollState */ }
+                Action::ToggleZoom => sess.toggle_zoom(),
+                Action::EnterScrollMode => sess.enter_scroll_mode(),
                 Action::ReloadConfig => {
                     let path = crate::config::default_config_path();
-                    let _ = BmuxConfig::hot_reload(&path);
+                    use crate::tui::status_bar::StatusMessage;
+                    match BmuxConfig::hot_reload(&path) {
+                        Ok(cfg) => {
+                            *state.bmux_config.lock().expect("config mutex") = cfg;
+                            sess.set_status_flash(StatusMessage::ConfigReloaded);
+                        }
+                        Err(e) => {
+                            sess.set_status_flash(StatusMessage::ConfigError(e.to_string()));
+                        }
+                    }
                 }
             }
         }
@@ -414,38 +431,43 @@ async fn handle_client_message(
                 }
             } // agents lock dropped here
 
-            let runtime = AgentRuntime::new(
-                &state.bmux_config,
-                &state.envelope,
-                &state.ipc_socket_path,
-            );
+            let (pty_cmd, config) = {
+                let bmux_config = state.bmux_config.lock().expect("config mutex");
+                let runtime = AgentRuntime::new(
+                    &bmux_config,
+                    &state.envelope,
+                    &state.ipc_socket_path,
+                );
 
-            let config = if agent_type == "custom" {
-                match state.bmux_config.agents.get_custom(&name) {
-                    Some(s) => AgentConfig {
-                        binary: s.binary,
-                        model: model.clone().unwrap_or(s.model),
-                        cost_per_1k_tokens: s.cost_per_1k_tokens,
-                        args: s.args,
-                    },
-                    None => {
-                        let data = format!(
-                            "Custom agent '{}' not found in config.toml. Add [agents.{}] section.",
-                            name, name
-                        );
-                        return Ok(HandleResult::Reply(ServerMessage::QueryResult { data }));
+                let config = if agent_type == "custom" {
+                    match bmux_config.agents.get_custom(&name) {
+                        Some(s) => AgentConfig {
+                            binary: s.binary,
+                            model: model.clone().unwrap_or(s.model),
+                            cost_per_1k_tokens: s.cost_per_1k_tokens,
+                            args: s.args,
+                        },
+                        None => {
+                            let data = format!(
+                                "Custom agent '{}' not found in config.toml. Add [agents.{}] section.",
+                                name, name
+                            );
+                            return Ok(HandleResult::Reply(ServerMessage::QueryResult { data }));
+                        }
                     }
+                } else {
+                    runtime.resolve_config(&agent_type, model.as_deref())
+                };
+
+                if agent_type != "shell" && which::which(&config.binary).is_err() {
+                    let data =
+                        format!("Error: Agent binary '{}' not found in PATH", config.binary);
+                    return Ok(HandleResult::Reply(ServerMessage::QueryResult { data }));
                 }
-            } else {
-                runtime.resolve_config(&agent_type, model.as_deref())
+
+                let pty_cmd = runtime.build_pty_command(&name, &agent_type, &config);
+                (pty_cmd, config)
             };
-
-            if agent_type != "shell" && which::which(&config.binary).is_err() {
-                let data = format!("Error: Agent binary '{}' not found in PATH", config.binary);
-                return Ok(HandleResult::Reply(ServerMessage::QueryResult { data }));
-            }
-
-            let pty_cmd = runtime.build_pty_command(&name, &agent_type, &config);
 
             // Split window and spawn structured PTY command — session lock released after block
             let (pane_id, child_pid) = {

@@ -283,6 +283,7 @@ fn render_pane_cells(buf: &mut Buffer, inner: Rect, snap: &PaneSnapshot, focused
 
 fn build_status_bar(snap: &SessionSnapshot) -> ratatui::text::Line<'static> {
     use ratatui::text::Line;
+    use crate::tui::scroll::SCROLL_MODE_INDICATOR;
     let mut spans: Vec<Span> = Vec::new();
     spans.push(Span::styled(
         format!(" [{}] ", snap.name),
@@ -310,5 +311,30 @@ fn build_status_bar(snap: &SessionSnapshot) -> ratatui::text::Line<'static> {
         }
         spans.push(Span::raw(" "));
     }
+
+    if let Some(win) = snap.windows.get(snap.active_window) {
+        if win.scroll_active {
+            spans.push(Span::styled(
+                format!(" {SCROLL_MODE_INDICATOR} "),
+                Style::default().fg(Color::Black).bg(Color::Cyan),
+            ));
+        }
+        if win.zoomed {
+            spans.push(Span::styled(
+                " [ZOOM] ",
+                Style::default().fg(Color::Black).bg(Color::Magenta),
+            ));
+        }
+    }
+
+    if let Some(msg) = &snap.status_message {
+        let style = if msg.starts_with("Config error:") {
+            Style::default().fg(Color::White).bg(Color::Red)
+        } else {
+            Style::default().fg(Color::Black).bg(Color::Blue)
+        };
+        spans.push(Span::styled(format!(" {msg} "), style));
+    }
+
     Line::from(spans)
 }

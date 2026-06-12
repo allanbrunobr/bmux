@@ -4,14 +4,15 @@ use portable_pty::CommandBuilder;
 use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout as RatatuiLayout},
-    style::{Color, Modifier, Style},
-    text::Span,
-    widgets::Paragraph,
 };
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-use super::{protocol::SessionSnapshot, window::Window};
+use super::{
+    protocol::SessionSnapshot,
+    status_bar::{StatusBar, StatusBarState, StatusMessage},
+    window::Window,
+};
 
 /// In-process session — owns all windows and panes directly.
 ///
@@ -22,6 +23,7 @@ pub struct Session {
     active_window: usize,
     created_at: DateTime<Utc>,
     next_window_id: usize,
+    status_flash: Option<StatusMessage>,
 }
 
 impl Session {
@@ -35,7 +37,28 @@ impl Session {
             active_window: 0,
             created_at: Utc::now(),
             next_window_id: 1,
+            status_flash: None,
         })
+    }
+
+    pub fn set_status_flash(&mut self, message: StatusMessage) {
+        self.status_flash = Some(message);
+    }
+
+    pub fn take_status_flash(&mut self) -> Option<StatusMessage> {
+        self.status_flash.take()
+    }
+
+    pub fn toggle_zoom(&mut self) {
+        self.active_window().toggle_zoom();
+    }
+
+    pub fn enter_scroll_mode(&mut self) {
+        self.active_window().enter_scroll_mode();
+    }
+
+    pub fn handle_scroll_input(&self, bytes: &[u8]) -> bool {
+        self.windows[self.active_window].handle_scroll_input(bytes)
     }
 
     pub fn window_count(&self) -> usize {
@@ -164,10 +187,15 @@ impl Session {
 
     /// Capture a serializable snapshot for the daemon protocol.
     pub fn snapshot(&self) -> SessionSnapshot {
+        let status_message = self
+            .status_flash
+            .as_ref()
+            .and_then(|m| m.text());
         SessionSnapshot {
             name: self.name.clone(),
             active_window: self.active_window,
             windows: self.windows.iter().map(|w| w.snapshot()).collect(),
+            status_message,
         }
     }
 
@@ -199,46 +227,19 @@ impl Session {
         self.windows[self.active_window].render(buf, content_area);
 
         // Render status bar
-        let status_line = self.build_status_bar();
-        frame.render_widget(Paragraph::new(status_line), status_area);
-    }
-
-    fn build_status_bar(&self) -> ratatui::text::Line<'static> {
-        use ratatui::text::Line;
-
-        let mut spans: Vec<Span> = Vec::new();
-
-        // Session name
-        spans.push(Span::styled(
-            format!(" [{}] ", self.name),
-            Style::default()
-                .fg(Color::Black)
-                .bg(Color::Green)
-                .add_modifier(Modifier::BOLD),
-        ));
-
-        // Window tabs
-        for (i, w) in self.windows.iter().enumerate() {
-            let is_active = i == self.active_window;
-            let label = format!(" {} {} ", i + 1, w.name);
-            if is_active {
-                spans.push(Span::styled(
-                    label,
-                    Style::default()
-                        .fg(Color::Black)
-                        .bg(Color::Yellow)
-                        .add_modifier(Modifier::BOLD),
-                ));
-            } else {
-                spans.push(Span::styled(
-                    label,
-                    Style::default().fg(Color::White).bg(Color::DarkGray),
-                ));
-            }
-            spans.push(Span::raw(" "));
-        }
-
-        Line::from(spans)
+        let active_win = &self.windows[self.active_window];
+        let status_state = StatusBarState {
+            session_name: self.name.clone(),
+            window_labels: self.windows.iter().map(|w| w.name.clone()).collect(),
+            active_window_idx: self.active_window,
+            in_scroll_mode: active_win.scroll_active(),
+            zoom: active_win.zoom_state(),
+            message: self
+                .status_flash
+                .clone()
+                .unwrap_or(StatusMessage::None),
+        };
+        frame.render_widget(StatusBar::new(&status_state), status_area);
     }
 }
 
