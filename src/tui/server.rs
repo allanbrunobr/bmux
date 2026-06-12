@@ -8,7 +8,7 @@
 /// - Broadcasts screen-state updates to all connected TUI clients
 /// - Handles CLI query messages (agent list, task send, context get, etc.)
 use anyhow::Result;
-use std::{path::PathBuf, sync::Arc, time::Duration};
+use std::{collections::HashMap, path::PathBuf, sync::Arc, time::Duration};
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
     net::{UnixListener, UnixStream},
@@ -25,6 +25,8 @@ use crate::orchestration::message_bus::{MessageBus, MessageType, ResultPayload};
 use crate::orchestration::task_router::{self, TaskRouter};
 use crate::security::envelope::{harden_socket_permissions, SecurityEnvelope};
 use crate::storage::context_store::ContextStore;
+use crate::workflow::engine::WorkflowEngine;
+use crate::workflow::yaml_parser::WorkflowParser;
 
 use super::{
     keybindings::Action,
@@ -39,8 +41,9 @@ use super::{
 struct DaemonState {
     session: Mutex<Session>,
     agents: Mutex<AgentRegistry>,
-    context: ContextStore,
+    context: Arc<ContextStore>,
     task_router: Arc<TaskRouter>,
+    workflow_engine: Arc<WorkflowEngine>,
     envelope: Arc<SecurityEnvelope>,
     bmux_config: BmuxConfig,
     session_name: String,
@@ -62,13 +65,19 @@ impl DaemonServer {
             .unwrap_or_else(|| PathBuf::from("/tmp"))
             .join("bmux")
             .join("context");
-        let context = ContextStore::open(name, &ctx_path)
-            .map_err(|e| anyhow::anyhow!("Failed to open context store: {e}"))?;
+        let context = Arc::new(
+            ContextStore::open(name, &ctx_path)
+                .map_err(|e| anyhow::anyhow!("Failed to open context store: {e}"))?,
+        );
 
         let bmux_config = BmuxConfig::load().unwrap_or_default();
         let bus = Arc::new(MessageBus::new(name)?);
         let ipc_socket_path = bus.socket_path().clone();
         let task_router = Arc::new(TaskRouter::new(bus, 300));
+        let workflow_engine = Arc::new(WorkflowEngine::with_shared(
+            Arc::clone(&context),
+            Arc::clone(&task_router),
+        ));
         let envelope = Arc::new(SecurityEnvelope::new(
             name,
             std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
@@ -83,6 +92,7 @@ impl DaemonServer {
                 agents: Mutex::new(AgentRegistry::new()),
                 context,
                 task_router,
+                workflow_engine,
                 envelope,
                 bmux_config,
                 session_name: name.to_string(),
@@ -102,6 +112,7 @@ impl DaemonServer {
 
         self.state.task_router.message_bus().start().await?;
         spawn_result_subscriber(Arc::clone(&self.state.task_router));
+        spawn_task_dispatch_subscriber(Arc::clone(&self.state));
 
         self.write_meta().await?;
 
@@ -198,6 +209,8 @@ async fn handle_client(
         | ClientMessage::ContextGet { .. }
         | ClientMessage::ContextList
         | ClientMessage::ContextDump
+        | ClientMessage::WorkflowRun { .. }
+        | ClientMessage::WorkflowStatus { .. }
     );
 
     // Drag state for mouse border resize (per-client)
@@ -555,7 +568,7 @@ async fn handle_client_message(
 
         ClientMessage::TaskSend { agent, content, model } => {
             // Determine the target agent name (direct or auto-routed)
-            let (data, target_agent, task_id) = if let Some(ref agent_name) = agent {
+            let (data, _target_agent, _task_id) = if let Some(ref agent_name) = agent {
                 // Direct send to named agent
                 match state.task_router.send_to_agent(agent_name, &content, 1).await {
                     Ok(task_router::SendResult::Dispatched { task_id }) => {
@@ -586,30 +599,6 @@ async fn handle_client_message(
                     Err(e) => (format!("Error: {e}"), None, None),
                 }
             };
-
-            if let (Some(target), Some(task_id)) = (&target_agent, &task_id) {
-                let _ = state.envelope.log_task_sent(target, task_id, &content);
-            }
-
-            // Deliver sanitized task content to the agent's pane PTY stdin.
-            if let Some(target) = target_agent {
-                let input = match state.envelope.sanitize_task_content(&content) {
-                    Ok(bytes) => bytes,
-                    Err(e) => {
-                        let data = format!("Error: {e}");
-                        return Ok(HandleResult::Reply(ServerMessage::QueryResult { data }));
-                    }
-                };
-                let reg = state.agents.lock().await;
-                if let Some(info) = reg.get(&target) {
-                    if let Some(pane_id) = info.pane_id {
-                        let mut sess = state.session.lock().await;
-                        if let Err(e) = sess.send_input_to_pane(pane_id, &input) {
-                            tracing::warn!(agent = %target, pane = pane_id, "Failed to deliver task to PTY: {e}");
-                        }
-                    }
-                }
-            }
 
             return Ok(HandleResult::Reply(ServerMessage::QueryResult { data }));
         }
@@ -699,6 +688,47 @@ async fn handle_client_message(
             };
             return Ok(HandleResult::Reply(ServerMessage::QueryResult { data }));
         }
+
+        ClientMessage::WorkflowRun { file, input } => {
+            let parser = WorkflowParser::new();
+            let dag = match parser.parse_file(&file) {
+                Ok(d) => d,
+                Err(e) => {
+                    let data = format!("Error parsing workflow: {e}");
+                    return Ok(HandleResult::Reply(ServerMessage::QueryResult { data }));
+                }
+            };
+
+            let run_id = uuid::Uuid::new_v4().to_string();
+            let workflow_name = dag.definition.name.clone();
+            let input_map: HashMap<String, serde_json::Value> = match input {
+                Some(json) => serde_json::from_str(&json).unwrap_or_default(),
+                None => HashMap::new(),
+            };
+
+            let engine = Arc::clone(&state.workflow_engine);
+            let run_id_bg = run_id.clone();
+            tokio::spawn(async move {
+                if let Err(e) = engine.run(&dag, &run_id_bg, input_map).await {
+                    tracing::error!(run_id = %run_id_bg, "Workflow run failed: {e}");
+                }
+            });
+
+            let data = format!(
+                "Workflow '{workflow_name}' started (run_id: {run_id})\nUse `bmux workflow status {run_id}` to check progress.",
+            );
+            return Ok(HandleResult::Reply(ServerMessage::QueryResult { data }));
+        }
+
+        ClientMessage::WorkflowStatus { id } => {
+            let data = match state.workflow_engine.get_status(&id) {
+                Ok(Some(run)) => serde_json::to_string_pretty(&run)
+                    .unwrap_or_else(|e| format!("Error serializing status: {e}")),
+                Ok(None) => format!("Workflow run '{id}' not found."),
+                Err(e) => format!("Error: {e}"),
+            };
+            return Ok(HandleResult::Reply(ServerMessage::QueryResult { data }));
+        }
     }
     Ok(HandleResult::Ok)
 }
@@ -707,6 +737,77 @@ async fn handle_client_message(
 
 fn build_snapshot(sess: &Session) -> SessionSnapshot {
     sess.snapshot()
+}
+
+/// Deliver sanitized task content to an agent's PTY pane.
+async fn deliver_task_to_pane(
+    state: &DaemonState,
+    agent_id: &str,
+    task_id: &str,
+    content: &str,
+) {
+    let input = match state.envelope.sanitize_task_content(content) {
+        Ok(bytes) => bytes,
+        Err(e) => {
+            state
+                .task_router
+                .fail_active_task_delivery(agent_id, &e.to_string())
+                .await;
+            return;
+        }
+    };
+
+    let pane_id = {
+        let reg = state.agents.lock().await;
+        match reg.get(agent_id).and_then(|info| info.pane_id) {
+            Some(id) => id,
+            None => {
+                state
+                    .task_router
+                    .fail_active_task_delivery(agent_id, "agent has no pane")
+                    .await;
+                return;
+            }
+        }
+    };
+
+    let delivered = {
+        let mut sess = state.session.lock().await;
+        sess.send_input_to_pane(pane_id, &input).is_ok()
+    };
+
+    if delivered {
+        let _ = state.envelope.log_task_sent(agent_id, task_id, content);
+    } else {
+        state
+            .task_router
+            .fail_active_task_delivery(agent_id, "PTY write failed")
+            .await;
+    }
+}
+
+/// Subscribe to task dispatches and deliver content to agent PTY panes.
+fn spawn_task_dispatch_subscriber(state: Arc<DaemonState>) {
+    let mut rx = state.task_router.subscribe_dispatches();
+    tokio::spawn(async move {
+        loop {
+            match rx.recv().await {
+                Ok(event) => {
+                    deliver_task_to_pane(
+                        &state,
+                        &event.agent_id,
+                        &event.task_id,
+                        &event.content,
+                    )
+                    .await;
+                }
+                Err(broadcast::error::RecvError::Lagged(n)) => {
+                    tracing::warn!("Task dispatch subscriber lagged by {n} messages");
+                }
+                Err(broadcast::error::RecvError::Closed) => break,
+            }
+        }
+    });
 }
 
 /// Subscribe to IPC Result messages and advance the task lifecycle.

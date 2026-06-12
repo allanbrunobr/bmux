@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
-use tokio::sync::RwLock;
+use tokio::sync::{broadcast, RwLock};
 use tracing::{info, warn};
 
 use crate::orchestration::message_bus::{
@@ -83,6 +83,18 @@ pub struct AgentInfo {
 }
 
 // ---------------------------------------------------------------------------
+// Task dispatch events (PTY delivery hook for daemon)
+// ---------------------------------------------------------------------------
+
+/// Emitted whenever a task is dispatched to an agent (immediate or dequeued).
+#[derive(Debug, Clone)]
+pub struct TaskDispatchEvent {
+    pub agent_id: String,
+    pub task_id: String,
+    pub content: String,
+}
+
+// ---------------------------------------------------------------------------
 // TaskRouter
 // ---------------------------------------------------------------------------
 
@@ -96,22 +108,31 @@ pub struct TaskRouter {
     queues: Arc<RwLock<HashMap<String, Vec<String>>>>,
     /// How many seconds to wait before timing out a queued auto-route task.
     queue_timeout_seconds: u64,
+    /// Notifies listeners (daemon) to deliver task content to agent PTY panes.
+    dispatch_tx: broadcast::Sender<TaskDispatchEvent>,
 }
 
 impl TaskRouter {
     pub fn new(bus: Arc<MessageBus>, queue_timeout_seconds: u64) -> Self {
+        let (dispatch_tx, _) = broadcast::channel(256);
         Self {
             bus,
             agents: Arc::new(RwLock::new(HashMap::new())),
             tasks: Arc::new(RwLock::new(HashMap::new())),
             queues: Arc::new(RwLock::new(HashMap::new())),
             queue_timeout_seconds,
+            dispatch_tx,
         }
     }
 
     /// Access the underlying message bus (for daemon lifecycle wiring).
     pub fn message_bus(&self) -> &Arc<MessageBus> {
         &self.bus
+    }
+
+    /// Subscribe to task dispatches for PTY delivery in the daemon.
+    pub fn subscribe_dispatches(&self) -> broadcast::Receiver<TaskDispatchEvent> {
+        self.dispatch_tx.subscribe()
     }
 
     /// Register a known agent with the router.
@@ -403,6 +424,39 @@ impl TaskRouter {
         Ok(())
     }
 
+    /// Mark the agent's active task failed when PTY delivery fails; return agent to Idle.
+    pub async fn fail_active_task_delivery(&self, agent_id: &str, reason: &str) {
+        let failed = {
+            let mut tasks = self.tasks.write().await;
+            let mut failed_task_id = None;
+            for task in tasks.values_mut() {
+                if task.destination == agent_id && task.status == TaskStatus::Active {
+                    task.status = TaskStatus::Failed;
+                    failed_task_id = Some(task.id.clone());
+                }
+            }
+            failed_task_id
+        };
+
+        {
+            let status_arc = self.bus.agent_status();
+            let mut status_map = status_arc.write().await;
+            status_map.insert(agent_id.to_string(), AgentState::Idle);
+        }
+
+        if let Some(task_id) = failed {
+            warn!(
+                task_id = %task_id,
+                agent = %agent_id,
+                reason = %reason,
+                "Task failed: PTY delivery error"
+            );
+            if let Err(e) = self.dispatch_next_for_agent(agent_id).await {
+                warn!(agent = %agent_id, "Failed to dispatch next task after delivery failure: {e}");
+            }
+        }
+    }
+
     /// Mark an agent as crashed: sets status to Error, marks its active task failed.
     pub async fn handle_agent_crash(&self, agent_id: &str) {
         // Mark agent error
@@ -460,6 +514,7 @@ impl TaskRouter {
         let agent_id = task.destination.clone();
         let content = task.content.clone();
         let priority = task.priority;
+        let task_id_for_event = task_id.clone();
 
         // Store the task
         {
@@ -476,7 +531,7 @@ impl TaskRouter {
 
         // Send via message bus (best-effort — bus may not be running for in-process use)
         let payload = serde_json::to_value(TaskPayload {
-            content,
+            content: content.clone(),
             priority,
             preferred_model: None,
             max_cost_usd: None,
@@ -493,6 +548,13 @@ impl TaskRouter {
                 info!(task_id = %task_id, agent = %agent_id, "Task dispatched (in-process, bus not active: {e})");
             }
         }
+
+        let _ = self.dispatch_tx.send(TaskDispatchEvent {
+            agent_id,
+            task_id: task_id_for_event,
+            content,
+        });
+
         Ok(())
     }
 

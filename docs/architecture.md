@@ -25,7 +25,7 @@ BMUX is a terminal multiplexer that orchestrates multiple AI agent CLIs in share
 | Operation | Path |
 |-----------|------|
 | Spawn agent | CLI/TUI → `DaemonServer` → `AgentRuntime` → `SecurityEnvelope::build_agent_launch_command` → PTY pane |
-| Send task | `TaskRouter` dispatch + `SecurityEnvelope::sanitize_task_content` → PTY stdin |
+| Send task | `TaskRouter` dispatch → `TaskDispatchEvent` → sanitize → PTY stdin (audit on success) |
 | Task result | Agent IPC `Result` → `MessageBus` → subscriber → `TaskRouter::handle_result` → agent Idle + next queue |
 | Context | `ContextStore` (per-session DB); `ContextSet` audited via envelope |
 | Config | `agent_catalog` SSOT for builtins; `[agents.<name>]` for custom agents |

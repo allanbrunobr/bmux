@@ -143,6 +143,14 @@ impl WorkflowEngine {
         }
     }
 
+    /// Create an engine sharing existing Arc handles (daemon wiring).
+    pub fn with_shared(context_store: Arc<ContextStore>, task_router: Arc<TaskRouter>) -> Self {
+        Self {
+            context_store,
+            task_router,
+        }
+    }
+
     /// Create a new engine with a default stub TaskRouter (for standalone use).
     pub fn new(context_store: ContextStore) -> Self {
         let bus = Arc::new(

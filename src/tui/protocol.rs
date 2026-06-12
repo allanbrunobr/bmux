@@ -52,6 +52,13 @@ pub enum ClientMessage {
     ContextList,
     /// Dump context as JSON.
     ContextDump,
+    /// Run a workflow YAML file in the background.
+    WorkflowRun {
+        file: String,
+        input: Option<String>,
+    },
+    /// Get workflow run status by ID.
+    WorkflowStatus { id: String },
 }
 
 // ── Server → Client ───────────────────────────────────────────────────────────
