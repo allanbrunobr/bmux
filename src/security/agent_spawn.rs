@@ -1,8 +1,10 @@
 //! Structured agent spawn for PTY panes — env_clear, minimal allowlist, optional sandbox wrap.
 //!
-//! Note: `portable-pty` closes all fds ≥ 3 before exec, so `create_secret_fd` cannot be
-//! passed through this path; agents receive `BMUX_SECRETS_PATH` instead.
+//! Secret and IPC keys are injected via preserved pipe fds (`BMUX_SECRET_FD`, `BMUX_IPC_HMAC_FD`)
+//! using `tui::pty_spawn` (selective fd close instead of `portable-pty`'s `close_random_fds`).
 
+#[cfg(unix)]
+use std::os::unix::io::RawFd;
 use std::path::Path;
 
 use portable_pty::CommandBuilder;
@@ -10,7 +12,18 @@ use tracing::warn;
 
 use super::envelope::SecurityEnvelope;
 
-/// Build a [`CommandBuilder`] for direct PTY spawn (no shell line injection).
+/// Command plus pipe fds to preserve into the child at slots 3..N.
+#[derive(Debug)]
+pub struct AgentPtySpawn {
+    pub command: CommandBuilder,
+    #[cfg(unix)]
+    pub inject_fds: Vec<RawFd>,
+    #[cfg(not(unix))]
+    pub inject_fds: Vec<i32>,
+}
+
+/// Build a structured PTY spawn bundle for direct spawn (no shell line injection).
+#[allow(clippy::too_many_arguments)]
 pub fn build_agent_pty_command(
     envelope: &SecurityEnvelope,
     ipc_socket: &Path,
@@ -19,14 +32,90 @@ pub fn build_agent_pty_command(
     binary: &str,
     args: &[String],
     model: &str,
-) -> CommandBuilder {
+    ipc_hmac_key: Option<&[u8]>,
+) -> AgentPtySpawn {
+    let mut inject_fds = Vec::new();
     let inner = if agent_type == "shell" {
         build_shell_command(binary, args)
     } else {
         build_isolated_command(envelope, ipc_socket, agent_name, agent_type, binary, args, model)
     };
 
-    wrap_sandbox(envelope, agent_name, agent_type, inner)
+    let mut cmd = wrap_sandbox(envelope, agent_name, agent_type, inner);
+
+    #[cfg(unix)]
+    if agent_type != "shell" {
+        attach_secret_fd(envelope, &mut cmd, &mut inject_fds);
+        attach_ipc_hmac_fd(ipc_hmac_key, &mut cmd, &mut inject_fds);
+    }
+
+    AgentPtySpawn {
+        command: cmd,
+        inject_fds,
+    }
+}
+
+#[cfg(unix)]
+fn attach_secret_fd(
+    envelope: &SecurityEnvelope,
+    cmd: &mut CommandBuilder,
+    inject_fds: &mut Vec<RawFd>,
+) {
+    const PRIMARY_KEYS: &[&str] = &["anthropics", "openai", "google"];
+    for key in PRIMARY_KEYS {
+        if let Ok(fd) = envelope.secrets.create_secret_fd(key) {
+            let slot = 3 + inject_fds.len() as RawFd;
+            inject_fds.push(fd);
+            cmd.env("BMUX_SECRET_FD", slot.to_string());
+            cmd.env_remove("BMUX_SECRETS_PATH");
+            return;
+        }
+    }
+}
+
+#[cfg(unix)]
+fn attach_ipc_hmac_fd(
+    key: Option<&[u8]>,
+    cmd: &mut CommandBuilder,
+    inject_fds: &mut Vec<RawFd>,
+) {
+    let Some(key_bytes) = key else { return };
+    if key_bytes.len() < 32 {
+        return;
+    }
+    let (read_fd, write_fd) = match create_pipe() {
+        Ok(pair) => pair,
+        Err(_) => return,
+    };
+    let written = unsafe {
+        libc::write(
+            write_fd,
+            key_bytes.as_ptr() as *const libc::c_void,
+            key_bytes.len(),
+        )
+    };
+    unsafe {
+        libc::close(write_fd);
+    }
+    if written < 0 {
+        unsafe {
+            libc::close(read_fd);
+        }
+        return;
+    }
+    let slot = 3 + inject_fds.len() as RawFd;
+    inject_fds.push(read_fd);
+    cmd.env("BMUX_IPC_HMAC_FD", slot.to_string());
+}
+
+#[cfg(unix)]
+fn create_pipe() -> std::io::Result<(RawFd, RawFd)> {
+    let mut fds = [0i32; 2];
+    let rc = unsafe { libc::pipe(fds.as_mut_ptr()) };
+    if rc != 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    Ok((fds[0], fds[1]))
 }
 
 fn build_shell_command(binary: &str, args: &[String]) -> CommandBuilder {
@@ -161,7 +250,7 @@ mod tests {
             },
             false,
         );
-        let cmd = build_agent_pty_command(
+        let spawn = build_agent_pty_command(
             &envelope,
             Path::new("/tmp/ipc.sock"),
             "arch",
@@ -169,10 +258,11 @@ mod tests {
             "claude",
             &[],
             "claude-sonnet-4-20250514",
+            None,
         );
-        let argv = cmd.get_argv();
+        let argv = spawn.command.get_argv();
         assert_eq!(argv.first().map(|s| s.to_str()), Some(Some("claude")));
-        assert!(cmd.get_env("BMUX_SESSION").is_some());
-        assert!(cmd.get_env("BMUX_PROJECT_DIR").is_some());
+        assert!(spawn.command.get_env("BMUX_SESSION").is_some());
+        assert!(spawn.command.get_env("BMUX_PROJECT_DIR").is_some());
     }
 }

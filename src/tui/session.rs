@@ -1,6 +1,6 @@
 use anyhow::Result;
 use chrono::{DateTime, Utc};
-use portable_pty::CommandBuilder;
+use crate::security::agent_spawn::AgentPtySpawn;
 use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout as RatatuiLayout},
@@ -117,9 +117,9 @@ impl Session {
 
     /// Split horizontally and spawn a structured PTY command (no shell line injection).
     /// Returns `(pane_id, child_pid)`.
-    pub fn split_and_spawn_agent(&mut self, cmd: CommandBuilder) -> Result<(usize, Option<u32>)> {
+    pub fn split_and_spawn_agent(&mut self, spawn: AgentPtySpawn) -> Result<(usize, Option<u32>)> {
         let win = &mut self.windows[self.active_window];
-        let pane_id = win.split_horizontal_with_command(cmd)?;
+        let pane_id = win.split_horizontal_with_command(spawn)?;
         let pid = win.pane_mut(pane_id).and_then(|p| p.process_id());
         Ok((pane_id, pid))
     }
@@ -254,18 +254,35 @@ pub struct SessionMeta {
     pub window_count: usize,
     pub socket_path: PathBuf,
     pub created_at: DateTime<Utc>,
+    /// Hex-encoded HMAC key for signing daemon protocol frames (0600 meta file).
+    #[serde(default)]
+    pub auth_key_hex: String,
 }
 
 impl SessionMeta {
-    pub fn new(name: &str, window_count: usize, socket_path: PathBuf) -> Self {
+    pub fn new(name: &str, window_count: usize, socket_path: PathBuf, auth_key_hex: String) -> Self {
         Self {
             name: name.to_string(),
             pid: std::process::id(),
             window_count,
             socket_path,
             created_at: Utc::now(),
+            auth_key_hex,
         }
     }
+}
+
+/// Load the session auth key from registry metadata.
+pub fn load_session_auth_key(session_name: &str) -> anyhow::Result<Vec<u8>> {
+    let path = meta_path(session_name);
+    let data = std::fs::read_to_string(&path)
+        .map_err(|e| anyhow::anyhow!("cannot read session meta {}: {e}", path.display()))?;
+    let meta: SessionMeta = serde_json::from_str(&data)?;
+    if meta.auth_key_hex.is_empty() {
+        anyhow::bail!("session '{}' has no auth_key_hex in metadata", session_name);
+    }
+    crate::tui::session_auth::SessionAuth::from_hex(&meta.auth_key_hex)
+        .map(|a| a.key_bytes().to_vec())
 }
 
 /// Path to the directory used as the session registry.

@@ -1,5 +1,11 @@
 use anyhow::{Context, Result};
-use portable_pty::{CommandBuilder, MasterPty, PtySize, native_pty_system};
+use portable_pty::{CommandBuilder, MasterPty, PtySize};
+#[cfg(unix)]
+use std::os::unix::io::RawFd;
+#[cfg(not(unix))]
+type RawFd = i32;
+
+use super::pty_spawn;
 use super::{protocol::{CellData, PaneSnapshot}, scroll::ScrollState};
 use ratatui::{
     buffer::Buffer,
@@ -36,7 +42,7 @@ impl Pane {
     /// Spawn a new pane running `$SHELL` (or `/bin/sh` as fallback).
     pub fn new(id: usize, rows: u16, cols: u16) -> Result<Self> {
         let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
-        Self::spawn_with_command(id, rows, cols, CommandBuilder::new(&shell))
+        Self::spawn_with_command(id, rows, cols, CommandBuilder::new(&shell), Vec::new())
     }
 
     /// Spawn a pane with a pre-built command (structured agent spawn — no shell injection).
@@ -45,27 +51,22 @@ impl Pane {
         rows: u16,
         cols: u16,
         cmd: CommandBuilder,
+        inject_fds: Vec<RawFd>,
     ) -> Result<Self> {
-        let pty_system = native_pty_system();
-        let pair = pty_system
-            .openpty(PtySize {
-                rows,
-                cols,
-                pixel_width: 0,
-                pixel_height: 0,
-            })
-            .context("Failed to open PTY")?;
-
-        let child = pair
-            .slave
-            .spawn_command(cmd)
+        let spawned = pty_spawn::spawn_with_preserved_fds(rows, cols, cmd, inject_fds)
             .context("Failed to spawn command in PTY")?;
 
-        let writer = pair
+        for fd in spawned.parent_fds_to_close {
+            unsafe {
+                libc::close(fd);
+            }
+        }
+
+        let writer = spawned
             .master
             .take_writer()
             .context("Failed to acquire PTY writer")?;
-        let mut reader = pair
+        let mut reader = spawned
             .master
             .try_clone_reader()
             .context("Failed to acquire PTY reader")?;
@@ -112,8 +113,8 @@ impl Pane {
             id,
             parser,
             writer,
-            master: pair.master,
-            child,
+            master: spawned.master,
+            child: spawned.child,
             has_output,
             scroll,
         })

@@ -7,7 +7,7 @@ use super::keybindings::Action;
 
 // ── Client → Server ───────────────────────────────────────────────────────────
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum ClientMessage {
     /// Initial handshake: tell the server the client's terminal size.

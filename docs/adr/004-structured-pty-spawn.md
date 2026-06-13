@@ -7,7 +7,7 @@
 
 Phase 2 used `split_and_run_command` with a shell string built by `SecurityEnvelope::build_agent_launch_command`. That path is vulnerable to injection via model/args and cannot pass file descriptors (e.g. `create_secret_fd`).
 
-`portable-pty` closes all fds ≥ 3 before exec, so secret fd injection must use `BMUX_SECRETS_PATH` until a non–close-fds spawn path exists.
+`portable-pty` closes all fds ≥ 3 before exec. BMUX uses `tui::pty_spawn` with selective `close_fds_except` so `create_secret_fd` and `BMUX_IPC_HMAC_FD` survive into the child.
 
 ## Decision
 
@@ -20,7 +20,7 @@ Phase 2 used `split_and_run_command` with a shell string built by `SecurityEnvel
 
 - Positive: no shell line injection on agent spawn; PID tracked for kill.
 - Negative: Landlock cannot apply inside the PTY child; macOS/Linux use wrapper binaries.
-- Follow-up: fd-based secrets when spawn API allows preserving fds.
+- Resolved: fd-based secrets via `pty_spawn` (see ADR-004 follow-up, 2026-06-12).
 
 ## Compliance
 
