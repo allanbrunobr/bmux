@@ -1,5 +1,5 @@
 use anyhow::Result;
-use portable_pty::CommandBuilder;
+use crate::security::agent_spawn::AgentPtySpawn;
 use ratatui::{buffer::Buffer, layout::Rect};
 
 use ratatui::widgets::Widget;
@@ -107,11 +107,17 @@ impl Window {
     }
 
     /// Split horizontally and spawn a command in the new pane (structured agent spawn).
-    pub fn split_horizontal_with_command(&mut self, cmd: CommandBuilder) -> Result<usize> {
+    pub fn split_horizontal_with_command(&mut self, spawn: AgentPtySpawn) -> Result<usize> {
         let (rows, cols) = self.focused_inner_size();
         let new_id = self.next_pane_id;
         self.next_pane_id += 1;
-        let pane = Pane::spawn_with_command(new_id, rows, cols / 2, cmd)?;
+        let pane = Pane::spawn_with_command(
+            new_id,
+            rows,
+            cols / 2,
+            spawn.command,
+            spawn.inject_fds,
+        )?;
         self.panes.push(pane);
         self.layout = std::mem::replace(&mut self.layout, Layout::new(0))
             .split_h(self.focused_pane, new_id);

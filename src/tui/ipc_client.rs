@@ -10,7 +10,8 @@ use tokio::net::UnixStream;
 use tokio::time::{timeout, Duration};
 
 use super::protocol::{ClientMessage, ServerMessage};
-use super::session::{list_sessions, socket_path};
+use super::session::{list_sessions, meta_path, socket_path, SessionMeta};
+use super::session_auth::{self, SessionAuth, SignedServerFrame};
 
 /// Resolve which session to connect to.
 ///
@@ -58,6 +59,42 @@ pub fn resolve_session(explicit: Option<&str>) -> Result<PathBuf> {
     }
 }
 
+/// Extract session name from `/tmp/bmux-{name}.sock`.
+pub fn session_name_from_socket(sock: &Path) -> Option<String> {
+    let name = sock.file_name()?.to_str()?;
+    name.strip_prefix("bmux-")
+        .and_then(|s| s.strip_suffix(".sock"))
+        .map(str::to_string)
+}
+
+/// Load HMAC auth for a daemon socket from session registry metadata.
+pub fn auth_for_socket(sock: &Path) -> Result<SessionAuth> {
+    let session_name = session_name_from_socket(sock).ok_or_else(|| {
+        anyhow::anyhow!("cannot derive session name from socket {}", sock.display())
+    })?;
+    let path = meta_path(&session_name);
+    let data = std::fs::read_to_string(&path)
+        .with_context(|| format!("cannot read session meta {}", path.display()))?;
+    let meta: SessionMeta = serde_json::from_str(&data)?;
+    if meta.auth_key_hex.is_empty() {
+        anyhow::bail!("session '{}' metadata has no auth_key_hex", session_name);
+    }
+    SessionAuth::from_hex(&meta.auth_key_hex)
+}
+
+/// Serialize a signed client frame as a newline-terminated JSON line.
+pub fn encode_signed_client(auth: &SessionAuth, msg: ClientMessage) -> Result<String> {
+    let frame = session_auth::sign_client(auth, msg)?;
+    Ok(serde_json::to_string(&frame)? + "\n")
+}
+
+/// Verify and decode a signed server frame.
+pub fn parse_signed_server(auth: &SessionAuth, line: &str) -> Result<ServerMessage> {
+    let frame: SignedServerFrame = serde_json::from_str(line.trim())
+        .map_err(|e| anyhow::anyhow!("invalid signed server frame: {e}"))?;
+    session_auth::verify_server(auth, &frame)
+}
+
 /// Send a query to a session daemon and return the response string.
 ///
 /// Opens a new connection, sends one `ClientMessage`, reads one `ServerMessage`,
@@ -71,6 +108,7 @@ pub async fn query(sock_path: &Path, msg: ClientMessage) -> Result<String> {
 }
 
 async fn query_inner(sock_path: &Path, msg: ClientMessage) -> Result<String> {
+    let auth = auth_for_socket(sock_path)?;
     let stream = UnixStream::connect(sock_path)
         .await
         .with_context(|| format!("Cannot connect to session at {}", sock_path.display()))?;
@@ -78,9 +116,9 @@ async fn query_inner(sock_path: &Path, msg: ClientMessage) -> Result<String> {
     let (reader, mut writer) = stream.into_split();
     let mut reader = BufReader::new(reader);
 
-    let json = serde_json::to_string(&msg)?;
-    writer.write_all(json.as_bytes()).await?;
-    writer.write_all(b"\n").await?;
+    writer
+        .write_all(encode_signed_client(&auth, msg)?.as_bytes())
+        .await?;
     writer.flush().await?;
 
     let mut line = String::new();
@@ -90,11 +128,25 @@ async fn query_inner(sock_path: &Path, msg: ClientMessage) -> Result<String> {
         anyhow::bail!("Session closed connection without responding.");
     }
 
-    let response: ServerMessage = serde_json::from_str(line.trim())?;
+    let response = parse_signed_server(&auth, &line)?;
 
     match response {
         ServerMessage::QueryResult { data } => Ok(data),
         ServerMessage::Error { msg } => anyhow::bail!("{}", msg),
         other => anyhow::bail!("Unexpected response: {:?}", other),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_session_name_from_socket_path() {
+        let sock = PathBuf::from("/tmp/bmux-myproj.sock");
+        assert_eq!(
+            session_name_from_socket(&sock).as_deref(),
+            Some("myproj")
+        );
     }
 }

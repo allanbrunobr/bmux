@@ -24,6 +24,7 @@ use tokio::{
 };
 
 use super::{
+    ipc_client::{auth_for_socket, encode_signed_client, parse_signed_server},
     keybindings::{Action, KeybindingState, key_event_to_bytes},
     protocol::{
         ClientMessage, PaneSnapshot, ServerMessage, SessionSnapshot,
@@ -32,6 +33,7 @@ use super::{
 };
 
 pub async fn run_client(socket: PathBuf) -> Result<()> {
+    let auth = auth_for_socket(&socket)?;
     let stream = UnixStream::connect(&socket)
         .await
         .with_context(|| format!("Cannot connect to session socket {:?}", socket))?;
@@ -48,22 +50,25 @@ pub async fn run_client(socket: PathBuf) -> Result<()> {
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    // Send Init
-    let init_msg =
-        serde_json::to_string(&ClientMessage::Init { rows, cols })? + "\n";
-    write_half.write_all(init_msg.as_bytes()).await?;
+    // Send Init (signed)
+    write_half
+        .write_all(
+            encode_signed_client(&auth, ClientMessage::Init { rows, cols })?.as_bytes(),
+        )
+        .await?;
 
     // Channel: server-reader thread → main loop
     let (state_tx, mut state_rx) = mpsc::unbounded_channel::<SessionSnapshot>();
     let (server_err_tx, mut server_err_rx) = mpsc::unbounded_channel::<()>();
 
     // Server reader task
+    let reader_auth = auth.clone();
     tokio::spawn(async move {
         let mut lines = BufReader::new(read_half).lines();
         loop {
             match lines.next_line().await {
                 Ok(Some(line)) if !line.is_empty() => {
-                    if let Ok(msg) = serde_json::from_str::<ServerMessage>(&line) {
+                    if let Ok(msg) = parse_signed_server(&reader_auth, &line) {
                         match msg {
                             ServerMessage::State(snap) => {
                                 let _ = state_tx.send(snap);
@@ -132,17 +137,27 @@ pub async fn run_client(socket: PathBuf) -> Result<()> {
                         if matches!(act, Action::Detach) {
                             running = false;
                         }
-                        let msg =
-                            serde_json::to_string(&ClientMessage::Action { action: act })?
-                                + "\n";
-                        write_half.write_all(msg.as_bytes()).await?;
+                        write_half
+                            .write_all(
+                                encode_signed_client(
+                                    &auth,
+                                    ClientMessage::Action { action: act },
+                                )?
+                                .as_bytes(),
+                            )
+                            .await?;
                     } else if pass_to_pty {
                         let bytes = key_event_to_bytes(key);
                         if !bytes.is_empty() {
-                            let msg =
-                                serde_json::to_string(&ClientMessage::Input { data: bytes })?
-                                    + "\n";
-                            write_half.write_all(msg.as_bytes()).await?;
+                            write_half
+                                .write_all(
+                                    encode_signed_client(
+                                        &auth,
+                                        ClientMessage::Input { data: bytes },
+                                    )?
+                                    .as_bytes(),
+                                )
+                                .await?;
                         }
                     }
                 }
@@ -150,35 +165,65 @@ pub async fn run_client(socket: PathBuf) -> Result<()> {
                     use crossterm::event::{MouseEventKind, MouseButton};
                     match mouse.kind {
                         MouseEventKind::Down(MouseButton::Left) => {
-                            let msg = serde_json::to_string(
-                                &ClientMessage::MouseClick { col: mouse.column, row: mouse.row }
-                            )? + "\n";
-                            write_half.write_all(msg.as_bytes()).await?;
+                            write_half
+                                .write_all(
+                                    encode_signed_client(
+                                        &auth,
+                                        ClientMessage::MouseClick {
+                                            col: mouse.column,
+                                            row: mouse.row,
+                                        },
+                                    )?
+                                    .as_bytes(),
+                                )
+                                .await?;
                         }
                         MouseEventKind::Drag(MouseButton::Left) => {
-                            let msg = serde_json::to_string(
-                                &ClientMessage::MouseDrag { col: mouse.column, row: mouse.row }
-                            )? + "\n";
-                            write_half.write_all(msg.as_bytes()).await?;
+                            write_half
+                                .write_all(
+                                    encode_signed_client(
+                                        &auth,
+                                        ClientMessage::MouseDrag {
+                                            col: mouse.column,
+                                            row: mouse.row,
+                                        },
+                                    )?
+                                    .as_bytes(),
+                                )
+                                .await?;
                         }
                         MouseEventKind::Moved => {
-                            // Send hover position for border highlighting + drag
-                            let msg = serde_json::to_string(
-                                &ClientMessage::MouseDrag { col: mouse.column, row: mouse.row }
-                            )? + "\n";
-                            write_half.write_all(msg.as_bytes()).await?;
+                            write_half
+                                .write_all(
+                                    encode_signed_client(
+                                        &auth,
+                                        ClientMessage::MouseDrag {
+                                            col: mouse.column,
+                                            row: mouse.row,
+                                        },
+                                    )?
+                                    .as_bytes(),
+                                )
+                                .await?;
                         }
                         MouseEventKind::Up(MouseButton::Left) => {
-                            let msg = serde_json::to_string(&ClientMessage::MouseUp)? + "\n";
-                            write_half.write_all(msg.as_bytes()).await?;
+                            write_half
+                                .write_all(
+                                    encode_signed_client(&auth, ClientMessage::MouseUp)?
+                                        .as_bytes(),
+                                )
+                                .await?;
                         }
                         _ => {}
                     }
                 }
                 Event::Resize(cols, rows) => {
-                    let msg =
-                        serde_json::to_string(&ClientMessage::Resize { rows, cols })? + "\n";
-                    write_half.write_all(msg.as_bytes()).await?;
+                    write_half
+                        .write_all(
+                            encode_signed_client(&auth, ClientMessage::Resize { rows, cols })?
+                                .as_bytes(),
+                        )
+                        .await?;
                 }
                 _ => {}
             }

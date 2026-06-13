@@ -135,6 +135,7 @@ pub struct MessageBus {
     session_id: String,
     socket_path: PathBuf,
     hmac_key: Arc<hmac::Key>,
+    hmac_key_bytes: Arc<Vec<u8>>,
     agent_status: AgentStatusMap,
     tx: broadcast::Sender<IpcMessage>,
 }
@@ -149,12 +150,15 @@ impl MessageBus {
         // Use a separate socket for the agent IPC bus (distinct from the TUI daemon socket)
         let socket_path =
             PathBuf::from(format!("/tmp/bmux-{}-ipc.sock", session_id));
-        let hmac_key = Arc::new(generate_session_key()?);
+        let key_bytes = crate::security::hmac::generate_key()
+            .map_err(|e| anyhow!("HMAC key generation failed: {e}"))?;
+        let hmac_key = Arc::new(hmac::Key::new(hmac::HMAC_SHA256, &key_bytes));
         let (tx, _) = broadcast::channel(CHANNEL_CAPACITY);
         Ok(Self {
             session_id,
             socket_path,
             hmac_key,
+            hmac_key_bytes: Arc::new(key_bytes),
             agent_status: Arc::new(RwLock::new(HashMap::new())),
             tx,
         })
@@ -168,6 +172,11 @@ impl MessageBus {
     /// HMAC key — hand this to spawned agents so they can sign messages.
     pub fn hmac_key(&self) -> Arc<hmac::Key> {
         Arc::clone(&self.hmac_key)
+    }
+
+    /// Raw HMAC key bytes for fd injection into agent children (`BMUX_IPC_HMAC_FD`).
+    pub fn hmac_key_bytes(&self) -> &[u8] {
+        &self.hmac_key_bytes
     }
 
     /// Subscribe to validated inbound messages.

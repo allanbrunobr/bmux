@@ -8,6 +8,7 @@ BMUX is a terminal multiplexer that orchestrates multiple AI agent CLIs in share
 ┌─────────────┐     Unix socket      ┌──────────────────┐
 │  bmux CLI   │ ───────────────────► │  DaemonServer    │
 │  bmux TUI   │   /tmp/bmux-{s}.sock │  (session+PTY)   │
+│             │   HMAC-signed JSON   │  pty_spawn fds   │
 └─────────────┘                      └────────┬─────────┘
                                             │
                     ┌───────────────────────┼───────────────────────┐

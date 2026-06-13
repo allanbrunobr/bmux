@@ -40,6 +40,9 @@ use super::{
         ClientMessage, ServerMessage, SessionSnapshot,
     },
     session::{Session, SessionMeta, meta_path, socket_path},
+    session_auth::{
+        self, SessionAuth, SignedClientFrame, SignedServerFrame,
+    },
 };
 
 /// Shared daemon state accessible from all client handlers.
@@ -51,6 +54,7 @@ struct DaemonState {
     workflow_engine: Arc<WorkflowEngine>,
     envelope: Arc<SecurityEnvelope>,
     bmux_config: StdMutex<BmuxConfig>,
+    session_auth: Arc<SessionAuth>,
     session_name: String,
     ipc_socket_path: PathBuf,
 }
@@ -89,6 +93,7 @@ impl DaemonServer {
             bmux_config.security.clone(),
             bmux_config.audit.enabled,
         ));
+        let session_auth = Arc::new(SessionAuth::generate()?);
 
         Ok(Self {
             name: name.to_string(),
@@ -100,6 +105,7 @@ impl DaemonServer {
                 workflow_engine,
                 envelope,
                 bmux_config: StdMutex::new(bmux_config),
+                session_auth,
                 session_name: name.to_string(),
                 ipc_socket_path,
             }),
@@ -128,7 +134,7 @@ impl DaemonServer {
 
         self.write_meta().await?;
 
-        let (tx, _) = broadcast::channel::<Arc<ServerMessage>>(32);
+        let (tx, _) = broadcast::channel::<Arc<SignedServerFrame>>(32);
         let tx = Arc::new(tx);
 
         // Background task: broadcast PTY output at ~60fps
@@ -145,8 +151,12 @@ impl DaemonServer {
                         (out, build_snapshot(&sess))
                     };
                     if has_output {
-                        let msg = Arc::new(ServerMessage::State(snapshot));
-                        let _ = tx_clone.send(msg);
+                        if let Ok(frame) = session_auth::sign_server(
+                            &state.session_auth,
+                            ServerMessage::State(snapshot),
+                        ) {
+                            let _ = tx_clone.send(Arc::new(frame));
+                        }
                     }
                 }
             });
@@ -167,11 +177,29 @@ impl DaemonServer {
 
     async fn write_meta(&self) -> Result<()> {
         let window_count = self.state.session.lock().await.window_count();
-        let meta = SessionMeta::new(&self.name, window_count, self.socket_path.clone());
+        let meta = SessionMeta::new(
+            &self.name,
+            window_count,
+            self.socket_path.clone(),
+            self.state.session_auth.key_hex(),
+        );
         let json = serde_json::to_string_pretty(&meta)?;
         tokio::fs::write(&self.meta_path, json).await?;
+        use std::os::unix::fs::PermissionsExt;
+        tokio::fs::set_permissions(&self.meta_path, std::fs::Permissions::from_mode(0o600)).await?;
         Ok(())
     }
+}
+
+fn parse_signed_client(line: &str, auth: &SessionAuth) -> Result<ClientMessage> {
+    let frame: SignedClientFrame = serde_json::from_str(line)
+        .map_err(|e| anyhow::anyhow!("invalid signed client frame: {e}"))?;
+    session_auth::verify_client(auth, &frame)
+}
+
+fn encode_signed_server(auth: &SessionAuth, msg: ServerMessage) -> Result<String> {
+    let frame = session_auth::sign_server(auth, msg)?;
+    Ok(serde_json::to_string(&frame)? + "\n")
 }
 
 /// Handle one connected client for its lifetime.
@@ -182,8 +210,9 @@ impl DaemonServer {
 async fn handle_client(
     stream: UnixStream,
     state: Arc<DaemonState>,
-    broadcast_tx: Arc<broadcast::Sender<Arc<ServerMessage>>>,
+    broadcast_tx: Arc<broadcast::Sender<Arc<SignedServerFrame>>>,
 ) -> Result<()> {
+    let auth = Arc::clone(&state.session_auth);
     let (read_half, mut write_half) = stream.into_split();
     let mut lines = BufReader::new(read_half).lines();
 
@@ -198,10 +227,17 @@ async fn handle_client(
         _ => return Ok(()), // Client disconnected immediately
     };
 
-    let first_msg: ClientMessage = match serde_json::from_str(&first_line) {
+    let first_msg: ClientMessage = match parse_signed_client(&first_line, &auth) {
         Ok(m) => m,
         Err(e) => {
             tracing::debug!("Invalid first message from client: {e}");
+            let line = encode_signed_server(
+                &auth,
+                ServerMessage::Error {
+                    msg: format!("Authentication failed: {e}"),
+                },
+            )?;
+            write_half.write_all(line.as_bytes()).await?;
             return Ok(());
         }
     };
@@ -237,14 +273,16 @@ async fn handle_client(
             &mut drag_left_pane,
         ).await?;
         if let HandleResult::Reply(response) = result {
-            let json = serde_json::to_string(&response)? + "\n";
-            write_half.write_all(json.as_bytes()).await?;
+            let line = encode_signed_server(&auth, response)?;
+            write_half.write_all(line.as_bytes()).await?;
         }
 
         // CLI queries that mutate session state (AgentSpawn, AgentKill)
         // must broadcast updated snapshot to all TUI clients.
         let snap = build_snapshot(&*state.session.lock().await);
-        let _ = broadcast_tx.send(Arc::new(ServerMessage::State(snap)));
+        if let Ok(frame) = session_auth::sign_server(&auth, ServerMessage::State(snap)) {
+            let _ = broadcast_tx.send(Arc::new(frame));
+        }
 
         // Close connection — CLI clients are one-shot
         return Ok(());
@@ -259,8 +297,8 @@ async fn handle_client(
     {
         let sess = state.session.lock().await;
         let snap = build_snapshot(&sess);
-        let msg = serde_json::to_string(&ServerMessage::State(snap))? + "\n";
-        write_half.write_all(msg.as_bytes()).await?;
+        let line = encode_signed_server(&auth, ServerMessage::State(snap))?;
+        write_half.write_all(line.as_bytes()).await?;
     }
 
     // Subscribe to broadcasts only for TUI clients
@@ -288,7 +326,7 @@ async fn handle_client(
                     None => break, // Client disconnected
                     Some(line) => {
                         if line.is_empty() { continue; }
-                        match serde_json::from_str::<ClientMessage>(&line) {
+                        match parse_signed_client(&line, &auth) {
                             Ok(msg) => {
                                 let result = handle_client_message(
                                     msg,
@@ -299,18 +337,18 @@ async fn handle_client(
                                 ).await?;
                                 match result {
                                     HandleResult::Detach => {
-                                        let json = serde_json::to_string(&ServerMessage::Detached)? + "\n";
-                                        write_half.write_all(json.as_bytes()).await?;
+                                        let line = encode_signed_server(&auth, ServerMessage::Detached)?;
+                                        write_half.write_all(line.as_bytes()).await?;
                                         break;
                                     }
                                     HandleResult::Reply(response) => {
-                                        let json = serde_json::to_string(&response)? + "\n";
-                                        write_half.write_all(json.as_bytes()).await?;
+                                        let line = encode_signed_server(&auth, response)?;
+                                        write_half.write_all(line.as_bytes()).await?;
                                     }
                                     HandleResult::Ok => {
                                         let snap = build_snapshot(&*state.session.lock().await);
-                                        let json = serde_json::to_string(&ServerMessage::State(snap))? + "\n";
-                                        write_half.write_all(json.as_bytes()).await?;
+                                        let line = encode_signed_server(&auth, ServerMessage::State(snap))?;
+                                        write_half.write_all(line.as_bytes()).await?;
                                     }
                                 }
                             }
@@ -431,13 +469,14 @@ async fn handle_client_message(
                 }
             } // agents lock dropped here
 
-            let (pty_cmd, config) = {
+            let (agent_spawn, config) = {
                 let bmux_config = state.bmux_config.lock().expect("config mutex");
                 let runtime = AgentRuntime::new(
                     &bmux_config,
                     &state.envelope,
                     &state.ipc_socket_path,
                 );
+                let ipc_key = state.task_router.message_bus().hmac_key_bytes();
 
                 let config = if agent_type == "custom" {
                     match bmux_config.agents.get_custom(&name) {
@@ -465,14 +504,19 @@ async fn handle_client_message(
                     return Ok(HandleResult::Reply(ServerMessage::QueryResult { data }));
                 }
 
-                let pty_cmd = runtime.build_pty_command(&name, &agent_type, &config);
-                (pty_cmd, config)
+                let agent_spawn = runtime.build_pty_command(
+                    &name,
+                    &agent_type,
+                    &config,
+                    Some(ipc_key),
+                );
+                (agent_spawn, config)
             };
 
             // Split window and spawn structured PTY command — session lock released after block
             let (pane_id, child_pid) = {
                 let mut sess = state.session.lock().await;
-                match sess.split_and_spawn_agent(pty_cmd) {
+                match sess.split_and_spawn_agent(agent_spawn) {
                     Ok(ids) => ids,
                     Err(e) => {
                         let data = format!("Error creating agent pane: {}", e);
