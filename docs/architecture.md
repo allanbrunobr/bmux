@@ -46,7 +46,7 @@ BMUX is a terminal multiplexer that orchestrates multiple AI agent CLIs in share
 
 | Module | Role |
 |--------|------|
-| `tui/` | Daemon, panes, protocol, client (zoom/scroll/reload via snapshots) |
+| `tui/` | Daemon, panes, protocol, client (zoom/scroll/reload via snapshots); `chrome.rs` draws pane cells, borders and agent titles for both modes |
 | `agents/` | Adapters, registry, runtime, catalog |
 | `orchestration/` | MessageBus, TaskRouter |
 | `storage/` | Context, sessions, audit log |
