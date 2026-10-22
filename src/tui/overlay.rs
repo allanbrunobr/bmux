@@ -9,7 +9,7 @@ use ratatui::{
     layout::Rect,
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, Paragraph, Widget},
+    widgets::{Block, BorderType, Borders, Clear, Paragraph, Widget},
 };
 
 use super::keybindings::HELP_ENTRIES;
@@ -194,6 +194,7 @@ pub fn render_help(area: Rect, buf: &mut Buffer, prefix_label: &str) {
         .block(
             Block::default()
                 .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
                 .border_style(Style::default().fg(Color::Yellow))
                 .title(" bmux keys "),
         )
@@ -249,5 +250,18 @@ mod tests {
             .map(|x| buf[(x, 0)].symbol().to_string())
             .collect();
         assert!(text.contains("bmux keys"));
+        assert!(text.contains('╭') && text.contains('╮'), "{text:?}");
+    }
+
+    #[test]
+    fn prompt_renders_on_the_given_row() {
+        let area = Rect::new(0, 0, 30, 3);
+        let mut buf = Buffer::empty(area);
+        let p = Prompt::with_text(PromptKind::RenameWindow, "api");
+        p.render(Rect::new(0, 2, 30, 1), &mut buf);
+        let last: String = (0..area.width)
+            .map(|x| buf[(x, 2)].symbol().to_string())
+            .collect();
+        assert!(last.starts_with(" Rename window:  api "), "{last:?}");
     }
 }

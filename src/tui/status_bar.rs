@@ -39,7 +39,7 @@ impl StatusMessage {
 pub struct StatusBarState {
     /// Current session name
     pub session_name: String,
-    /// Window index list, e.g. `[1*, 2, 3]`
+    /// Window names in order; tabs are drawn as ` 1 name `.
     pub window_labels: Vec<String>,
     /// Index of the active window (0-based)
     pub active_window_idx: usize,
@@ -51,6 +51,10 @@ pub struct StatusBarState {
     pub message: StatusMessage,
     /// Agents in the session (daemon mode only).
     pub agents: Vec<AgentBadge>,
+    /// The prefix key was pressed and the next key is a command.
+    pub prefix_active: bool,
+    /// Prefix key label for the help hint, e.g. `Ctrl-b`.
+    pub prefix_label: String,
 }
 
 impl Default for StatusBarState {
@@ -63,6 +67,8 @@ impl Default for StatusBarState {
             zoom: ZoomState::new(),
             message: StatusMessage::None,
             agents: Vec::new(),
+            prefix_active: false,
+            prefix_label: "Ctrl-b".to_string(),
         }
     }
 }
@@ -92,11 +98,11 @@ impl<'a> StatusBar<'a> {
         Self { state }
     }
 
-    /// Build the left segment: `[session_name]`
+    /// Build the left segment: ` session_name `
     fn left_spans(&self) -> Vec<Span<'static>> {
         vec![
             Span::styled(
-                format!(" [{}] ", self.state.session_name.clone()),
+                format!(" {} ", self.state.session_name),
                 Style::default()
                     .fg(Color::Black)
                     .bg(Color::Green)
@@ -106,11 +112,11 @@ impl<'a> StatusBar<'a> {
         ]
     }
 
-    /// Build the centre segment: window list
+    /// Build the centre segment: window tabs ` 1 name `
     fn window_spans(&self) -> Vec<Span<'static>> {
         let mut spans = Vec::new();
-        for (i, label) in self.state.window_labels.iter().enumerate() {
-            let text = format!(" {label} ");
+        for (i, name) in self.state.window_labels.iter().enumerate() {
+            let text = format!(" {} {name} ", i + 1);
             if i == self.state.active_window_idx {
                 spans.push(Span::styled(
                     text,
@@ -125,6 +131,16 @@ impl<'a> StatusBar<'a> {
                     Style::default().fg(Color::White).bg(Color::DarkGray),
                 ));
             }
+            spans.push(Span::raw(" "));
+        }
+        if self.state.prefix_active {
+            spans.push(Span::styled(
+                " PREFIX ",
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(Color::Blue)
+                    .add_modifier(Modifier::BOLD),
+            ));
             spans.push(Span::raw(" "));
         }
         spans
@@ -150,16 +166,21 @@ impl<'a> StatusBar<'a> {
             ));
         }
 
-        // Status message (config reload / error)
+        // Status message (config reload / error / flash)
         if let Some(msg) = self.state.message.text() {
-            let style = match &self.state.message {
-                StatusMessage::ConfigError(_) => Style::default().fg(Color::White).bg(Color::Red),
-                _ => Style::default().fg(Color::Black).bg(Color::Blue),
-            };
-            spans.push(Span::styled(format!(" {msg} "), style));
+            spans.push(Span::styled(format!(" {msg} "), message_style(&msg)));
         }
 
         spans
+    }
+}
+
+/// Red for errors, blue otherwise.
+fn message_style(msg: &str) -> Style {
+    if msg.starts_with("Config error:") || msg.starts_with("Error") {
+        Style::default().fg(Color::White).bg(Color::Red)
+    } else {
+        Style::default().fg(Color::Black).bg(Color::Blue)
     }
 }
 
@@ -228,7 +249,7 @@ pub fn render_agent_badges(agents: &[AgentBadge], left_width: usize, area: Rect,
 }
 
 /// Status dot and colour for an agent status label.
-fn status_indicator(status: &str) -> (&'static str, Color) {
+pub(crate) fn status_indicator(status: &str) -> (&'static str, Color) {
     match status {
         "working" => ("●", Color::LightGreen),
         "idle" => ("○", Color::Gray),
@@ -252,9 +273,14 @@ pub fn spans_width(spans: &[Span]) -> usize {
 
 impl Widget for StatusBar<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
-        // Fill the background
-        for x in area.left()..area.right() {
-            buf[(x, area.top())].set_style(Style::default().fg(Color::White).bg(Color::DarkGray));
+        if area.height == 0 || area.width == 0 {
+            return;
+        }
+        // Clear the row (terminal default background).
+        let row = Rect::new(area.x, area.y, area.width, 1);
+        buf.set_style(row, Style::reset());
+        for x in row.left()..row.right() {
+            buf[(x, row.y)].set_symbol(" ");
         }
 
         let mut spans: Vec<Span> = Vec::new();
@@ -266,6 +292,16 @@ impl Widget for StatusBar<'_> {
         let line = Line::from(spans);
         buf.set_line(area.left(), area.top(), &line, area.width);
         render_agent_badges(&self.state.agents, left_width, area, buf);
+
+        if self.state.agents.is_empty() && self.state.message == StatusMessage::None {
+            let hint = format!("{} ? help ", self.state.prefix_label);
+            let hint_width = Span::raw(hint.as_str()).width();
+            let width = area.width as usize;
+            if left_width + 1 + hint_width <= width {
+                let x = area.left() + (width - hint_width) as u16;
+                buf.set_string(x, area.top(), hint, Style::default().fg(Color::DarkGray));
+            }
+        }
     }
 }
 
@@ -311,8 +347,10 @@ mod tests {
 
     #[test]
     fn shows_scroll_indicator_when_in_scroll_mode() {
-        let mut state = StatusBarState::default();
-        state.in_scroll_mode = true;
+        let state = StatusBarState {
+            in_scroll_mode: true,
+            ..Default::default()
+        };
         let row = render_status_bar(&state, 80);
         assert!(row.contains("[SCROLL]"), "Expected [SCROLL] in: {row:?}");
     }
@@ -347,8 +385,10 @@ mod tests {
 
     #[test]
     fn shows_config_reloaded_message() {
-        let mut state = StatusBarState::default();
-        state.message = StatusMessage::ConfigReloaded;
+        let state = StatusBarState {
+            message: StatusMessage::ConfigReloaded,
+            ..Default::default()
+        };
         let row = render_status_bar(&state, 80);
         assert!(
             row.contains("Config reloaded"),
@@ -358,8 +398,10 @@ mod tests {
 
     #[test]
     fn shows_config_error_message() {
-        let mut state = StatusBarState::default();
-        state.message = StatusMessage::ConfigError("bad field".to_string());
+        let state = StatusBarState {
+            message: StatusMessage::ConfigError("bad field".to_string()),
+            ..Default::default()
+        };
         let row = render_status_bar(&state, 80);
         assert!(
             row.contains("Config error"),
@@ -443,6 +485,58 @@ mod tests {
         state.agents = vec![badge("sh", "idle", 0.0, false)];
         let row = render_status_bar(&state, 80);
         assert!(!row.contains('Σ'), "row: {row}");
+    }
+
+    #[test]
+    fn session_chip_has_no_brackets() {
+        let state = StatusBarState::new("demo");
+        let row = render_status_bar(&state, 60);
+        assert!(row.starts_with(" demo "), "row: {row:?}");
+        assert!(!row.contains("[demo]"), "row: {row:?}");
+    }
+
+    #[test]
+    fn window_tabs_show_index_and_name() {
+        let mut state = StatusBarState::new("demo");
+        state.window_labels = vec!["parser".to_string(), "api".to_string()];
+        let row = render_status_bar(&state, 60);
+        assert!(row.contains(" demo   1 parser   2 api "), "row: {row:?}");
+    }
+
+    #[test]
+    fn prefix_chip_only_when_prefix_active() {
+        let mut state = StatusBarState::new("demo");
+        let row = render_status_bar(&state, 60);
+        assert!(!row.contains("PREFIX"), "row: {row:?}");
+        state.prefix_active = true;
+        let row = render_status_bar(&state, 60);
+        assert!(row.contains(" PREFIX "), "row: {row:?}");
+        let tab = row.find(" 1 1 ").unwrap();
+        assert!(row.find("PREFIX").unwrap() > tab, "row: {row:?}");
+    }
+
+    #[test]
+    fn help_hint_only_without_agents_and_message() {
+        let mut state = StatusBarState::new("demo");
+        state.prefix_label = "Ctrl-a".to_string();
+        let row = render_status_bar(&state, 60);
+        assert!(row.trim_end().ends_with("Ctrl-a ? help"), "row: {row:?}");
+
+        state.message = StatusMessage::Custom("hello".to_string());
+        let row = render_status_bar(&state, 60);
+        assert!(!row.contains("? help"), "row: {row:?}");
+
+        state.message = StatusMessage::None;
+        state.agents = vec![badge("dev", "idle", 0.1, true)];
+        let row = render_status_bar(&state, 60);
+        assert!(!row.contains("? help"), "row: {row:?}");
+    }
+
+    #[test]
+    fn error_messages_are_red() {
+        assert_eq!(message_style("Error: boom").bg, Some(Color::Red));
+        assert_eq!(message_style("Config error: x").bg, Some(Color::Red));
+        assert_eq!(message_style("Task queued").bg, Some(Color::Blue));
     }
 
     #[test]

@@ -160,31 +160,131 @@ pub struct PaneSnapshot {
     pub cells: Vec<Vec<CellData>>,
     pub cursor_row: u16,
     pub cursor_col: u16,
+    /// `false` when the application hid the cursor (`ESC [ ? 25 l`) or the
+    /// pane is in scroll mode.
+    #[serde(default = "default_true")]
+    pub cursor_visible: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Terminal colour as reported by the emulator.
+///
+/// Indexed colours are kept as indices so the client's terminal theme
+/// decides how they look (instead of a fixed RGB approximation).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum CellColor {
+    /// The terminal's default foreground/background.
+    #[default]
+    Default,
+    /// Palette index 0–255.
+    Idx(u8),
+    /// 24-bit colour.
+    Rgb(u8, u8, u8),
+}
+
+impl CellColor {
+    fn is_default(&self) -> bool {
+        *self == CellColor::Default
+    }
+}
+
+/// One terminal cell. Default values are not serialized, so blank cells
+/// encode as `{}`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CellData {
-    pub ch: char,
-    pub fg_r: u8,
-    pub fg_g: u8,
-    pub fg_b: u8,
-    pub bg_r: u8,
-    pub bg_g: u8,
-    pub bg_b: u8,
+    /// Cell contents (a full grapheme); `" "` for an empty cell.
+    #[serde(default = "blank_cell", skip_serializing_if = "is_blank_cell")]
+    pub ch: String,
+    #[serde(default, skip_serializing_if = "CellColor::is_default")]
+    pub fg: CellColor,
+    #[serde(default, skip_serializing_if = "CellColor::is_default")]
+    pub bg: CellColor,
+    #[serde(default, skip_serializing_if = "is_false")]
     pub bold: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub italic: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub underline: bool,
+    /// Reverse video (swap foreground and background).
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub inverse: bool,
+    /// Second cell of a wide (double-width) character; draws nothing.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub wide_cont: bool,
+}
+
+fn blank_cell() -> String {
+    " ".to_string()
+}
+
+fn is_blank_cell(ch: &str) -> bool {
+    ch == " "
+}
+
+fn is_false(b: &bool) -> bool {
+    !*b
 }
 
 impl Default for CellData {
     fn default() -> Self {
         Self {
-            ch: ' ',
-            fg_r: 0,
-            fg_g: 0,
-            fg_b: 0,
-            bg_r: 0,
-            bg_g: 0,
-            bg_b: 0,
+            ch: blank_cell(),
+            fg: CellColor::Default,
+            bg: CellColor::Default,
             bold: false,
+            italic: false,
+            underline: false,
+            inverse: false,
+            wide_cont: false,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_cell_serializes_empty_and_round_trips() {
+        let cell = CellData::default();
+        let json = serde_json::to_string(&cell).unwrap();
+        assert_eq!(json, "{}");
+        let back: CellData = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, cell);
+    }
+
+    #[test]
+    fn styled_cell_round_trips() {
+        let cell = CellData {
+            ch: "界".to_string(),
+            fg: CellColor::Idx(196),
+            bg: CellColor::Rgb(1, 2, 3),
+            bold: true,
+            italic: true,
+            underline: true,
+            inverse: true,
+            wide_cont: false,
+        };
+        let json = serde_json::to_string(&cell).unwrap();
+        assert!(!json.contains("wide_cont"), "{json}");
+        let back: CellData = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, cell);
+    }
+
+    #[test]
+    fn cell_without_new_fields_uses_defaults() {
+        let back: CellData = serde_json::from_str(r#"{"ch":"a","bold":true}"#).unwrap();
+        assert_eq!(back.ch, "a");
+        assert!(back.bold);
+        assert_eq!(back.fg, CellColor::Default);
+        assert_eq!(back.bg, CellColor::Default);
+        assert!(!back.italic && !back.underline && !back.inverse && !back.wide_cont);
+    }
+
+    #[test]
+    fn pane_snapshot_without_cursor_visible_defaults_to_visible() {
+        let json = r#"{"id":1,"rows":1,"cols":1,"cells":[[{}]],"cursor_row":0,"cursor_col":0}"#;
+        let snap: PaneSnapshot = serde_json::from_str(json).unwrap();
+        assert!(snap.cursor_visible);
+        assert_eq!(snap.cells[0][0], CellData::default());
     }
 }

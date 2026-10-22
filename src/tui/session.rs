@@ -264,7 +264,15 @@ impl Session {
 
     // ── Rendering ─────────────────────────────────────────────────────────────
 
-    pub fn render(&mut self, frame: &mut Frame) {
+    /// Draw the active window and the status bar. Returns the cursor
+    /// position of the focused pane, if its application shows a cursor;
+    /// the caller decides whether to place it (overlays hide it).
+    pub fn render(
+        &mut self,
+        frame: &mut Frame,
+        prefix_active: bool,
+        prefix_label: &str,
+    ) -> Option<(u16, u16)> {
         let total = frame.area();
 
         // Split vertically: content area + 1-row status bar
@@ -278,9 +286,9 @@ impl Session {
 
         // Render active window
         let buf = frame.buffer_mut();
-        self.windows[self.active_window].render(buf, content_area);
+        let cursor = self.windows[self.active_window].render(buf, content_area);
         if self.status_rows == 0 {
-            return;
+            return cursor;
         }
 
         // Render status bar
@@ -293,8 +301,11 @@ impl Session {
             zoom: active_win.zoom_state(),
             message: self.status_flash.clone().unwrap_or(StatusMessage::None),
             agents: Vec::new(),
+            prefix_active,
+            prefix_label: prefix_label.to_string(),
         };
         frame.render_widget(StatusBar::new(&status_state), status_area);
+        cursor
     }
 }
 

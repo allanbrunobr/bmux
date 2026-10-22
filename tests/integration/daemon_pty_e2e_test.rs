@@ -88,7 +88,7 @@ async fn integration_daemon_pty_spawn_echo_output() {
                                     .cells
                                     .iter()
                                     .flatten()
-                                    .map(|c| if c.ch == '\0' { ' ' } else { c.ch })
+                                    .map(|c| c.ch.as_str())
                                     .collect();
                                 if text.contains("BMUX_PTY_E2E_OK") {
                                     saw_marker = true;

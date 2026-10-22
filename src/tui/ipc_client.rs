@@ -91,7 +91,7 @@ pub fn encode_signed_client(auth: &SessionAuth, msg: ClientMessage) -> Result<St
 pub fn parse_signed_server(auth: &SessionAuth, line: &str) -> Result<ServerMessage> {
     let frame: SignedServerFrame = serde_json::from_str(line.trim())
         .map_err(|e| anyhow::anyhow!("invalid signed server frame: {e}"))?;
-    session_auth::verify_server(auth, &frame)
+    session_auth::verify_server(auth, frame)
 }
 
 /// Send a query to a session daemon and return the response string.

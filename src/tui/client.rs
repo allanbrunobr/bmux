@@ -11,9 +11,7 @@ use ratatui::{
     backend::CrosstermBackend,
     buffer::Buffer,
     layout::{Constraint, Direction, Layout as RLayout, Rect},
-    style::{Color, Modifier, Style},
-    text::Span,
-    widgets::{Block, Borders, Paragraph, Widget},
+    widgets::Widget,
     Frame, Terminal,
 };
 use std::{
@@ -27,12 +25,14 @@ use tokio::{
 };
 
 use super::{
+    chrome::{cursor_position, pane_block, pane_title, render_pane_cells},
     ipc_client::{auth_for_socket, encode_signed_client, parse_signed_server},
     keybindings::{key_event_to_bytes, Action, KeybindingState},
     overlay::{render_help, Prompt, PromptKind, PromptOutcome},
-    protocol::{ClientMessage, PaneSnapshot, ServerMessage, SessionSnapshot, WindowSnapshot},
+    protocol::{AgentBadge, ClientMessage, ServerMessage, SessionSnapshot, WindowSnapshot},
     session::STATUS_FLASH_TTL,
-    status_bar::{render_agent_badges, spans_width},
+    status_bar::{StatusBar, StatusBarState, StatusMessage},
+    zoom::ZoomState,
 };
 use crate::config::settings::BmuxConfig;
 
@@ -77,6 +77,13 @@ fn summarize_reply(data: &str) -> String {
     out
 }
 
+/// Bad frames in a row, after a good one, before the client gives up.
+const MAX_BAD_FRAMES: u32 = 3;
+
+const UNREADABLE_DAEMON: &str = "Cannot read messages from the session daemon. \
+     It may be running a different bmux version. Stop it with `bmux kill <session>` \
+     and start the session again.";
+
 pub async fn run_client(socket: PathBuf) -> Result<()> {
     let auth = auth_for_socket(&socket)?;
     let stream = UnixStream::connect(&socket)
@@ -107,36 +114,56 @@ pub async fn run_client(socket: PathBuf) -> Result<()> {
     // Channel: server-reader thread → main loop
     let (state_tx, mut state_rx) = mpsc::unbounded_channel::<SessionSnapshot>();
     let (reply_tx, mut reply_rx) = mpsc::unbounded_channel::<String>();
-    let (server_err_tx, mut server_err_rx) = mpsc::unbounded_channel::<()>();
+    // `Some(reason)` when the client gives up on the daemon's messages.
+    let (server_err_tx, mut server_err_rx) = mpsc::unbounded_channel::<Option<String>>();
 
     // Server reader task
     let reader_auth = auth.clone();
     tokio::spawn(async move {
         let mut lines = BufReader::new(read_half).lines();
+        let mut bad_frames = 0u32;
+        let mut read_any = false;
         loop {
             match lines.next_line().await {
                 Ok(Some(line)) if !line.is_empty() => {
-                    if let Ok(msg) = parse_signed_server(&reader_auth, &line) {
-                        match msg {
-                            ServerMessage::State(snap) => {
-                                let _ = state_tx.send(snap);
-                            }
-                            ServerMessage::Detached => {
-                                let _ = server_err_tx.send(());
+                    let msg = match parse_signed_server(&reader_auth, &line) {
+                        Ok(msg) => {
+                            bad_frames = 0;
+                            read_any = true;
+                            msg
+                        }
+                        Err(e) => {
+                            // Not `warn`: stderr is the TUI screen.
+                            tracing::debug!("Dropped a server frame: {e}");
+                            bad_frames += 1;
+                            // The daemon sends state only when it changes, so
+                            // an idle session may send just one frame.
+                            if !read_any || bad_frames >= MAX_BAD_FRAMES {
+                                let _ = server_err_tx.send(Some(UNREADABLE_DAEMON.to_string()));
                                 break;
                             }
-                            ServerMessage::Error { msg } => {
-                                tracing::warn!("Server error: {msg}");
-                            }
-                            ServerMessage::QueryResult { data } => {
-                                // Reply to a request made from the TUI (task send).
-                                let _ = reply_tx.send(data);
-                            }
+                            continue;
+                        }
+                    };
+                    match msg {
+                        ServerMessage::State(snap) => {
+                            let _ = state_tx.send(snap);
+                        }
+                        ServerMessage::Detached => {
+                            let _ = server_err_tx.send(None);
+                            break;
+                        }
+                        ServerMessage::Error { msg } => {
+                            tracing::warn!("Server error: {msg}");
+                        }
+                        ServerMessage::QueryResult { data } => {
+                            // Reply to a request made from the TUI (task send).
+                            let _ = reply_tx.send(data);
                         }
                     }
                 }
                 Ok(None) | Err(_) => {
-                    let _ = server_err_tx.send(());
+                    let _ = server_err_tx.send(None);
                     break;
                 }
                 _ => {}
@@ -166,6 +193,7 @@ pub async fn run_client(socket: PathBuf) -> Result<()> {
     let mut keybindings = KeybindingState::from_config(config.prefix_key());
     let mut ui = ClientUi::default();
     let mut running = true;
+    let mut exit_error: Option<String> = None;
 
     while running {
         // Drain latest state (use most recent snapshot)
@@ -177,7 +205,8 @@ pub async fn run_client(socket: PathBuf) -> Result<()> {
         }
 
         // Check for server disconnect
-        if server_err_rx.try_recv().is_ok() {
+        if let Ok(reason) = server_err_rx.try_recv() {
+            exit_error = reason;
             break;
         }
 
@@ -185,8 +214,14 @@ pub async fn run_client(socket: PathBuf) -> Result<()> {
         if let Some(ref snap) = current_snapshot {
             let flash = ui.active_flash().map(str::to_string);
             let prefix_label = keybindings.prefix().label();
+            let prefix_active = keybindings.is_prefix_active();
+            let overlay_open = ui.prompt.is_some() || ui.help;
             terminal.draw(|f| {
-                render_snapshot(f, snap, flash.as_deref());
+                let cursor =
+                    render_snapshot(f, snap, flash.as_deref(), prefix_active, &prefix_label);
+                if let (Some((x, y)), false) = (cursor, overlay_open) {
+                    f.set_cursor_position((x, y));
+                }
                 let area = f.area();
                 if let Some(prompt) = &ui.prompt {
                     let row = Rect::new(area.x, area.bottom().saturating_sub(1), area.width, 1);
@@ -381,12 +416,23 @@ pub async fn run_client(socket: PathBuf) -> Result<()> {
         LeaveAlternateScreen,
         crossterm::event::DisableMouseCapture
     )?;
-    Ok(())
+    match exit_error {
+        Some(reason) => Err(anyhow::anyhow!(reason)),
+        None => Ok(()),
+    }
 }
 
 // ── Rendering from snapshot ───────────────────────────────────────────────────
 
-fn render_snapshot(frame: &mut Frame, snap: &SessionSnapshot, flash: Option<&str>) {
+/// Draw a session snapshot. Returns the cursor position of the focused
+/// pane when its application shows a cursor and it is not in scroll mode.
+fn render_snapshot(
+    frame: &mut Frame,
+    snap: &SessionSnapshot,
+    flash: Option<&str>,
+    prefix_active: bool,
+    prefix_label: &str,
+) -> Option<(u16, u16)> {
     let total = frame.area();
     let status_rows = u16::from(snap.status_bar);
 
@@ -398,144 +444,165 @@ fn render_snapshot(frame: &mut Frame, snap: &SessionSnapshot, flash: Option<&str
     let content_area = chunks[0];
     let status_area = chunks[1];
 
-    // Find active window
+    let mut cursor = None;
     if let Some(win) = snap.windows.get(snap.active_window) {
-        let buf = frame.buffer_mut();
-        render_window(buf, content_area, win);
+        cursor = render_window(frame.buffer_mut(), content_area, win, &snap.agents);
     }
 
-    if status_rows == 0 {
-        return;
+    if status_rows > 0 {
+        let state = status_bar_state(snap, flash, prefix_active, prefix_label);
+        frame.render_widget(StatusBar::new(&state), status_area);
     }
-    // Status bar
-    let bar = build_status_bar(snap, flash);
-    let left_width = spans_width(&bar.spans);
-    frame.render_widget(Paragraph::new(bar), status_area);
-    render_agent_badges(&snap.agents, left_width, status_area, frame.buffer_mut());
+    cursor
 }
 
-fn render_window(buf: &mut Buffer, _area: Rect, win: &WindowSnapshot) {
+/// Status bar state for a daemon snapshot (same widget as local mode).
+fn status_bar_state(
+    snap: &SessionSnapshot,
+    flash: Option<&str>,
+    prefix_active: bool,
+    prefix_label: &str,
+) -> StatusBarState {
+    let win = snap.windows.get(snap.active_window);
+    let mut zoom = ZoomState::new();
+    if let Some(w) = win.filter(|w| w.zoomed) {
+        zoom.toggle(w.focused_pane);
+    }
+    let message = flash
+        .or(snap.status_message.as_deref())
+        .map(|m| StatusMessage::Custom(m.to_string()))
+        .unwrap_or(StatusMessage::None);
+    StatusBarState {
+        session_name: snap.name.clone(),
+        window_labels: snap.windows.iter().map(|w| w.name.clone()).collect(),
+        active_window_idx: snap.active_window,
+        in_scroll_mode: win.is_some_and(|w| w.scroll_active),
+        zoom,
+        message,
+        agents: snap.agents.clone(),
+        prefix_active,
+        prefix_label: prefix_label.to_string(),
+    }
+}
+
+fn render_window(
+    buf: &mut Buffer,
+    area: Rect,
+    win: &WindowSnapshot,
+    agents: &[AgentBadge],
+) -> Option<(u16, u16)> {
+    let mut cursor = None;
     for layout_entry in &win.pane_layouts {
         let rect = Rect::new(
             layout_entry.x,
             layout_entry.y,
             layout_entry.width,
             layout_entry.height,
-        );
-        let focused = layout_entry.id == win.focused_pane;
-        let border_style = if focused {
-            Style::default().fg(Color::Yellow)
-        } else {
-            Style::default().fg(Color::DarkGray)
-        };
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .border_style(border_style);
+        )
+        .intersection(area.intersection(buf.area));
+        // A zoomed window sends only the zoomed pane, which has the focus.
+        let focused = win.zoomed || layout_entry.id == win.focused_pane;
+        let mut block = pane_block(focused);
+        if let Some(title) = agents
+            .iter()
+            .find(|a| a.pane_id == Some(layout_entry.id))
+            .and_then(|a| pane_title(a, focused, rect.width))
+        {
+            block = block.title(title);
+        }
         let inner = block.inner(rect);
         block.render(rect, buf);
 
-        // Find pane cells
         if let Some(pane_snap) = win.pane_cells.iter().find(|p| p.id == layout_entry.id) {
-            render_pane_cells(buf, inner, pane_snap, focused);
-        }
-    }
-}
-
-fn render_pane_cells(buf: &mut Buffer, inner: Rect, snap: &PaneSnapshot, focused: bool) {
-    for (row_idx, row) in snap.cells.iter().enumerate() {
-        let y = inner.y + row_idx as u16;
-        if y >= inner.y + inner.height {
-            break;
-        }
-        for (col_idx, cell) in row.iter().enumerate() {
-            let x = inner.x + col_idx as u16;
-            if x >= inner.x + inner.width {
-                break;
+            render_pane_cells(buf, inner, pane_snap);
+            if focused && !win.scroll_active {
+                cursor = cursor_position(inner, pane_snap);
             }
-            let is_cursor =
-                focused && row_idx as u16 == snap.cursor_row && col_idx as u16 == snap.cursor_col;
-            let style = if is_cursor {
-                Style::default()
-                    .fg(Color::Black)
-                    .bg(Color::White)
-                    .add_modifier(Modifier::BOLD)
-            } else {
-                let fg = if cell.fg_r == 0 && cell.fg_g == 0 && cell.fg_b == 0 {
-                    Color::Reset
-                } else {
-                    Color::Rgb(cell.fg_r, cell.fg_g, cell.fg_b)
-                };
-                let bg = if cell.bg_r == 0 && cell.bg_g == 0 && cell.bg_b == 0 {
-                    Color::Reset
-                } else {
-                    Color::Rgb(cell.bg_r, cell.bg_g, cell.bg_b)
-                };
-                let mut s = Style::default().fg(fg).bg(bg);
-                if cell.bold {
-                    s = s.add_modifier(Modifier::BOLD);
-                }
-                s
-            };
-            let text = if cell.ch == '\0' { ' ' } else { cell.ch };
-            buf.set_string(x, y, text.to_string(), style);
         }
     }
+    cursor
 }
 
-fn build_status_bar(snap: &SessionSnapshot, flash: Option<&str>) -> ratatui::text::Line<'static> {
-    use crate::tui::scroll::SCROLL_MODE_INDICATOR;
-    use ratatui::text::Line;
-    let mut spans: Vec<Span> = Vec::new();
-    spans.push(Span::styled(
-        format!(" [{}] ", snap.name),
-        Style::default()
-            .fg(Color::Black)
-            .bg(Color::Green)
-            .add_modifier(Modifier::BOLD),
-    ));
-    for (i, w) in snap.windows.iter().enumerate() {
-        let active = i == snap.active_window;
-        let label = format!(" {} {} ", i + 1, w.name);
-        if active {
-            spans.push(Span::styled(
-                label,
-                Style::default()
-                    .fg(Color::Black)
-                    .bg(Color::Yellow)
-                    .add_modifier(Modifier::BOLD),
-            ));
-        } else {
-            spans.push(Span::styled(
-                label,
-                Style::default().fg(Color::White).bg(Color::DarkGray),
-            ));
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tui::protocol::{CellData, PaneLayout, PaneSnapshot};
+    use ratatui::{backend::TestBackend, Terminal};
+
+    fn snapshot(cursor_visible: bool) -> SessionSnapshot {
+        let mut cells = vec![vec![CellData::default(); 8]; 2];
+        cells[0][0].ch = "h".to_string();
+        SessionSnapshot {
+            name: "demo".to_string(),
+            active_window: 0,
+            windows: vec![WindowSnapshot {
+                id: 0,
+                name: "parser".to_string(),
+                pane_layouts: vec![PaneLayout {
+                    id: 3,
+                    x: 0,
+                    y: 0,
+                    width: 40,
+                    height: 4,
+                }],
+                pane_cells: vec![PaneSnapshot {
+                    id: 3,
+                    rows: 2,
+                    cols: 8,
+                    cells,
+                    cursor_row: 1,
+                    cursor_col: 2,
+                    cursor_visible,
+                }],
+                focused_pane: 3,
+                zoomed: false,
+                scroll_active: false,
+            }],
+            status_message: None,
+            agents: vec![AgentBadge {
+                name: "dev".to_string(),
+                agent_type: "claude-code".to_string(),
+                model: "claude-sonnet-4-5".to_string(),
+                status: "working".to_string(),
+                tokens: 0,
+                cost_usd: 0.14,
+                cost_tracked: true,
+                pane_id: Some(3),
+            }],
+            status_bar: true,
         }
-        spans.push(Span::raw(" "));
     }
 
-    if let Some(win) = snap.windows.get(snap.active_window) {
-        if win.scroll_active {
-            spans.push(Span::styled(
-                format!(" {SCROLL_MODE_INDICATOR} "),
-                Style::default().fg(Color::Black).bg(Color::Cyan),
-            ));
-        }
-        if win.zoomed {
-            spans.push(Span::styled(
-                " [ZOOM] ",
-                Style::default().fg(Color::Black).bg(Color::Magenta),
-            ));
-        }
+    fn draw(snap: &SessionSnapshot) -> (Buffer, Option<(u16, u16)>) {
+        let mut terminal = Terminal::new(TestBackend::new(60, 5)).unwrap();
+        let mut cursor = None;
+        terminal
+            .draw(|f| cursor = render_snapshot(f, snap, None, false, "Ctrl-b"))
+            .unwrap();
+        (terminal.backend().buffer().clone(), cursor)
     }
 
-    if let Some(msg) = flash.or(snap.status_message.as_deref()) {
-        let style = if msg.starts_with("Config error:") || msg.starts_with("Error") {
-            Style::default().fg(Color::White).bg(Color::Red)
-        } else {
-            Style::default().fg(Color::Black).bg(Color::Blue)
-        };
-        spans.push(Span::styled(format!(" {msg} "), style));
+    fn row(buf: &Buffer, y: u16) -> String {
+        (0..buf.area.width)
+            .map(|x| buf[(x, y)].symbol().to_string())
+            .collect()
     }
 
-    Line::from(spans)
+    #[test]
+    fn agent_pane_gets_rounded_border_and_title() {
+        let (buf, _) = draw(&snapshot(true));
+        let top = row(&buf, 0);
+        assert!(top.starts_with("╭ ● dev · sonnet-4-5 · $0.14 "), "{top:?}");
+        assert_eq!(buf[(1, 1)].symbol(), "h");
+        let bar = row(&buf, 4);
+        assert!(bar.starts_with(" demo   1 parser "), "{bar:?}");
+    }
+
+    #[test]
+    fn cursor_follows_application_visibility() {
+        let (_, cursor) = draw(&snapshot(true));
+        assert_eq!(cursor, Some((3, 2)));
+        let (_, cursor) = draw(&snapshot(false));
+        assert_eq!(cursor, None);
+    }
 }
