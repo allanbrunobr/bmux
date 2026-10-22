@@ -91,7 +91,7 @@ Inside a session, commands find the session from `BMUX_SESSION`. Outside a sessi
 
 ## Key bindings
 
-The prefix is `Ctrl-b`. You can change it with `[tui] prefix_key`. Press `Ctrl-b ?` in a session to show this list.
+The prefix is `Ctrl-b`. You can change it with `[tui] prefix_key`. After you press the prefix, the status bar shows `PREFIX` until the next key. Press `Ctrl-b ?` in a session to show this list.
 
 ![The key bindings overlay](docs/images/bmux-keys.png)
 
@@ -148,11 +148,11 @@ Built-in agent types:
 | `gemini` | `gemini` |
 | `shell` | your shell |
 
-You can add other CLIs as custom types in `config.toml`. Each agent runs in its own pane with a minimal environment. The pane title shows the agent name and model.
+You can add other CLIs as custom types in `config.toml`. Each agent runs in its own pane with a minimal environment. The pane border shows the agent's status, name, model and cost, for example `● dev · sonnet-4-5 · $0.14`.
 
 **How cost tracking works.** BMUX starts Claude Code with a known `--session-id` and follows the transcript at `~/.claude/projects/<project>/<session-id>.jsonl` (it also checks `$CLAUDE_CONFIG_DIR/projects`). Each assistant message in the transcript has a `usage` block. BMUX adds up input, output and prompt-cache tokens and prices them with the list price of the model family (Opus, Sonnet or Haiku). If BMUX does not know a model, it uses the agent's `cost_per_1k_tokens`.
 
-The status bar shows one badge per agent: `●` working, `○` idle, `◐` waiting, `✗` error. Each badge shows the agent's cost, and `Σ` shows the session total. Agents without cost tracking show `—`. The same transcript tells BMUX when Claude Code finishes a turn, so the task becomes `completed` and the next queued task for that agent starts.
+The status bar shows one badge per agent: `●` working, `○` idle, `◐` waiting, `✗` error. Each badge shows the agent's cost, and `Σ` shows the session total. Agents without cost tracking show no cost. The same transcript tells BMUX when Claude Code finishes a turn, so the task becomes `completed` and the next queued task for that agent starts.
 
 ## Tasks
 
