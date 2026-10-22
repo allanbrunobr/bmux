@@ -216,6 +216,8 @@ fn command_from_builder(builder: &CommandBuilder) -> Result<std::process::Comman
 
 /// Open a PTY and spawn `cmd`, preserving `inject_fds` in the child at slots 3..N.
 #[cfg(unix)]
+// openpty takes `*mut winsize` on macOS and `*const winsize` on Linux.
+#[allow(clippy::unnecessary_mut_passed)]
 pub fn spawn_with_preserved_fds(
     rows: u16,
     cols: u16,

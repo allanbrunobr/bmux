@@ -98,8 +98,8 @@ fn integration_seatbelt_profile_is_valid_sbpl() {
         "SBPL must start with version"
     );
     assert!(
-        profile.contains("(deny default)"),
-        "SBPL must deny by default"
+        profile.contains("(deny file-write*)"),
+        "SBPL must deny writes by default"
     );
     assert!(
         profile.contains(&dir.path().display().to_string()),

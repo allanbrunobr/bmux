@@ -220,7 +220,7 @@ cost_per_1k_tokens = 0.0001
 args = ["--mode", "interactive"]
 
 [security]
-sandbox = "landlock"         # "none" turns the agent sandbox off
+sandbox = "landlock"         # any value except "none" turns the agent sandbox on
 
 [audit]
 enabled = true
@@ -246,7 +246,7 @@ Agents run with your user account, so BMUX tries to limit what they and other lo
 - **Signed IPC.** The CLI, the TUI and the daemon sign every message with a per-session HMAC key. The agent message bus uses its own key, which agents get by file descriptor.
 - **Private sockets.** Session sockets and metadata files are `0600`.
 - **Clean environment.** BMUX clears the environment before it starts an agent, so tokens and keys in your shell do not leak into it. The agent gets `TERM`, the `BMUX_*` variables and the basic variables that the PTY layer sets, such as `HOME` and `PATH`. Commands are built as argument lists, never as shell strings.
-- **Sandbox.** On macOS, agents run under `sandbox-exec` with a Seatbelt profile scoped to the project directory. On Linux, they run under bubblewrap (`bwrap`) when it is installed. Set `sandbox = "none"` to turn it off. `shell` panes are never sandboxed.
+- **Sandbox.** Agents can read the system and use the network, which they need to run and to reach their model API. They can write only to the project directory, temp dirs and their own state dirs (such as `~/.claude`), and they cannot read `~/.config/bmux`. On macOS this uses `sandbox-exec` with a Seatbelt profile. On Linux it uses bubblewrap (`bwrap`) when it is installed; without it, agents run unsandboxed. Set `sandbox = "none"` to turn it off. `shell` panes are never sandboxed.
 - **Audit log.** Agent spawns, task deliveries and context writes go to an append-only audit log, with secrets removed. `bmux data purge` deletes it.
 - **Permission prompts stay on.** BMUX starts Claude Code with `--dangerously-skip-permissions` only if you set `allow_dangerous_permissions = true` in `[security]`.
 

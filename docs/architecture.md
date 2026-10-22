@@ -39,7 +39,7 @@ BMUX is a terminal multiplexer that orchestrates multiple AI agent CLIs in share
 2. **IPC bus** — HMAC on agent messages (socket 0600)
 3. **Daemon socket** — 0600 after bind
 4. **Secrets** — `~/.config/bmux/secrets.toml` (0600), fd injection API in `security/secrets.rs`
-5. **Sandbox** — `security/agent_spawn.rs` `wrap_sandbox`: Seatbelt profile via `sandbox-exec` on macOS, `bwrap` on Linux when installed. Off for `shell` panes and when `sandbox = "none"`
+5. **Sandbox** — `security/agent_spawn.rs` `wrap_sandbox`: Seatbelt profile via `sandbox-exec` on macOS, `bwrap` on Linux when installed. Writes allowed only in the project, temp dirs and agent state dirs (`AGENT_WRITABLE_HOME_DIRS`); `~/.config/bmux` hidden. Off for `shell` panes and when `sandbox = "none"`
 6. **Resilience** — IPC query timeout (5s), task prune after completion, `max_cost_usd` on auto-route
 
 ## Module map
