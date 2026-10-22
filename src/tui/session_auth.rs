@@ -121,4 +121,34 @@ mod tests {
         signed.hmac = "00".repeat(32);
         assert!(verify_client(&auth, &signed).is_err());
     }
+
+    /// A state frame must still verify after a trip through JSON. Without
+    /// serde_json's `float_roundtrip`, this cost parses back one ULP off,
+    /// the HMAC check fails and the client silently drops every frame.
+    #[test]
+    fn server_state_with_float_cost_survives_json() {
+        use crate::tui::protocol::{AgentBadge, SessionSnapshot};
+        let auth = SessionAuth::generate().unwrap();
+        let snap = SessionSnapshot {
+            name: "s".to_string(),
+            active_window: 0,
+            windows: Vec::new(),
+            status_message: None,
+            agents: vec![AgentBadge {
+                name: "dev".to_string(),
+                agent_type: "claude-code".to_string(),
+                model: "claude-sonnet-4-5".to_string(),
+                status: "idle".to_string(),
+                tokens: 1234,
+                cost_usd: 4.2749999999999996e-5,
+                cost_tracked: true,
+                pane_id: Some(1),
+            }],
+            status_bar: true,
+        };
+        let signed = sign_server(&auth, ServerMessage::State(snap)).unwrap();
+        let wire = serde_json::to_string(&signed).unwrap();
+        let received: SignedServerFrame = serde_json::from_str(&wire).unwrap();
+        assert!(verify_server(&auth, &received).is_ok());
+    }
 }

@@ -1,22 +1,24 @@
-# BMUX Configuration File
-# Copy to ~/.config/bmux/config.toml and customize.
-# All fields are optional — unset fields use sensible defaults.
+# BMUX configuration file
+# Copy to ~/.config/bmux/config.toml (or $XDG_CONFIG_HOME/bmux/config.toml).
+# Every field is optional. Unset fields use the defaults shown here.
+# Apply changes to a running session with `bmux config reload` or `Ctrl-b r`.
 
-# Prefix key (default: ctrl-b, same as tmux)
-prefix = "ctrl-b"
-
-# Scrollback buffer size per pane (lines). Minimum recommended: 10000.
-history_limit = 10000
-
-# Default shell for new panes. Defaults to $SHELL or /bin/sh.
+# ── Terminal UI ────────────────────────────────────────────────────────────
+[tui]
+# Prefix key: ctrl-<letter>, e.g. "ctrl-a" for screen-style bindings.
+prefix_key = "ctrl-b"
+# Shell for new panes. Default: $SHELL, then /bin/sh.
 # default_shell = "/bin/zsh"
+# Show the status bar (session, windows, agents and their estimated cost).
+status_bar = true
 
-# Enable mouse support (click to focus panes, scroll)
-mouse_support = false
+# ── Agents ─────────────────────────────────────────────────────────────────
+[agents]
+# Type used by `bmux agent spawn --name <name>` when no type is given.
+# claude-code (alias: claude), opencode, pi, gemini, shell, or a custom name.
+default_type = "claude-code"
 
-# ── Agent binaries ─────────────────────────────────────────────────────────
 [agents.claude_code]
-# Path or binary name for Claude Code agent
 binary = "claude"
 
 [agents.opencode]
@@ -25,20 +27,20 @@ binary = "opencode"
 [agents.pi]
 binary = "pi"
 
-# ── Security ─────────────────────────────────────────────────────────────
-[security]
-# Filesystem sandbox: landlock | namespace | seatbelt | none
-sandbox = "landlock"
-# Opt-in only — not recommended for production
-allow_dangerous_permissions = false
-
-# ── Audit ──────────────────────────────────────────────────────────────────
-[audit]
-enabled = true
-
-# ── Custom agents (example) ────────────────────────────────────────────────
+# Custom agent: `bmux agent spawn my-agent --name x`
 # [agents.my-agent]
 # binary = "my-agent-cli"
 # model = "llama-3.1-70b"
 # cost_per_1k_tokens = 0.0001
 # args = ["--mode", "interactive"]
+
+# ── Security ───────────────────────────────────────────────────────────────
+[security]
+# Filesystem sandbox for agents: landlock | namespace | seatbelt | none
+sandbox = "landlock"
+# Opt-in only. Not recommended.
+allow_dangerous_permissions = false
+
+# ── Audit ──────────────────────────────────────────────────────────────────
+[audit]
+enabled = true

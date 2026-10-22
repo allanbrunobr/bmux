@@ -91,7 +91,7 @@ impl Window {
         self.focused_pane
     }
 
-    // ── Story 1.2: Pane splitting ─────────────────────────────────────────────
+    // ── Pane splitting ─────────────────────────────────────────────
 
     /// Split the currently focused pane horizontally (left / right).
     pub fn split_horizontal(&mut self) -> Result<()> {
@@ -133,7 +133,7 @@ impl Window {
         Ok(())
     }
 
-    // ── Story 1.3: Navigation & resize ───────────────────────────────────────
+    // ── Navigation & resize ───────────────────────────────────────
 
     pub fn focus_left(&mut self) {
         if let Some(id) = self.layout.pane_to_left(self.focused_pane, self.last_area) {

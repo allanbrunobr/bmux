@@ -3,34 +3,93 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 /// Actions that the app can perform in response to prefix-key sequences.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Action {
-    // Story 1.2 – pane splitting
+    // pane splitting
     SplitHorizontal,
     SplitVertical,
-    // Story 1.3 – pane navigation
+    // pane navigation
     FocusLeft,
     FocusDown,
     FocusUp,
     FocusRight,
-    // Story 1.3 – pane resize
+    // pane resize
     ResizeLeft,
     ResizeDown,
     ResizeUp,
     ResizeRight,
-    // Story 1.4 – window management
+    // window management
     NewWindow,
     NextWindow,
     PrevWindow,
     SwitchWindow(usize),
-    // Story 1.3 – cycle focus (tmux 'o')
+    // cycle focus (tmux 'o')
     FocusNextPane,
-    // Story 1.5 – session management
+    // session management
     Detach,
-    // Story 1.6 – pane zoom
+    // pane zoom
     ToggleZoom,
-    // Story 1.7 – scroll/copy mode
+    // scroll/copy mode
     EnterScrollMode,
-    // Story 1.8 – config hot reload
+    // config hot reload
     ReloadConfig,
+    // Handled by the client: they open a prompt or an overlay.
+    /// `Ctrl-b ,` — rename the active window.
+    RenameWindow,
+    /// `Ctrl-b t` — send a task to the agent in the focused pane.
+    SendTask,
+    /// `Ctrl-b T` — send a task and let BMUX pick the agent.
+    SendTaskAuto,
+    /// `Ctrl-b ?` — show the key binding help.
+    ShowHelp,
+}
+
+/// A prefix key such as `Ctrl-b`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PrefixKey {
+    /// Lowercase ASCII letter, or `' '` for `ctrl-space`.
+    ch: char,
+}
+
+impl PrefixKey {
+    /// Parse `"ctrl-b"`, `"C-a"`, `"ctrl+space"` and similar spellings.
+    pub fn parse(spec: &str) -> Option<Self> {
+        let s = spec.trim().to_ascii_lowercase();
+        let rest = s
+            .strip_prefix("ctrl-")
+            .or_else(|| s.strip_prefix("ctrl+"))
+            .or_else(|| s.strip_prefix("c-"))?;
+        match rest {
+            "space" => Some(Self { ch: ' ' }),
+            r if r.len() == 1 && r.as_bytes()[0].is_ascii_lowercase() => Some(Self {
+                ch: r.as_bytes()[0] as char,
+            }),
+            _ => None,
+        }
+    }
+
+    /// Human-readable label, e.g. `Ctrl-b`.
+    pub fn label(&self) -> String {
+        if self.ch == ' ' {
+            "Ctrl-Space".to_string()
+        } else {
+            format!("Ctrl-{}", self.ch)
+        }
+    }
+
+    fn matches(&self, event: &KeyEvent) -> bool {
+        if !event.modifiers.contains(KeyModifiers::CONTROL) {
+            return false;
+        }
+        match event.code {
+            KeyCode::Char(c) => c.to_ascii_lowercase() == self.ch,
+            _ => false,
+        }
+    }
+}
+
+impl Default for PrefixKey {
+    fn default() -> Self {
+        Self { ch: 'b' }
+    }
 }
 
 /// Processes raw key events and implements the Ctrl-b prefix protocol.
@@ -40,13 +99,32 @@ pub enum Action {
 /// - All other keys are passed through to the focused PTY unchanged.
 pub struct KeybindingState {
     prefix_active: bool,
+    prefix: PrefixKey,
 }
 
 impl KeybindingState {
     pub fn new() -> Self {
+        Self::with_prefix(PrefixKey::default())
+    }
+
+    pub fn with_prefix(prefix: PrefixKey) -> Self {
         Self {
             prefix_active: false,
+            prefix,
         }
+    }
+
+    /// Build from a config value; unknown spellings fall back to `Ctrl-b`.
+    pub fn from_config(spec: &str) -> Self {
+        let prefix = PrefixKey::parse(spec).unwrap_or_else(|| {
+            tracing::warn!("Unknown prefix key '{spec}', using ctrl-b");
+            PrefixKey::default()
+        });
+        Self::with_prefix(prefix)
+    }
+
+    pub fn prefix(&self) -> PrefixKey {
+        self.prefix
     }
 
     pub fn is_prefix_active(&self) -> bool {
@@ -61,12 +139,14 @@ impl KeybindingState {
     pub fn process(&mut self, event: KeyEvent) -> (Option<Action>, bool) {
         if self.prefix_active {
             self.prefix_active = false;
+            if self.prefix.matches(&event) {
+                // Prefix pressed twice: send the prefix key itself to the PTY.
+                return (None, true);
+            }
             let action = Self::map_prefix_key(event.code);
             // Key is always consumed in prefix mode — never forwarded to PTY
             (action, false)
-        } else if event.modifiers.contains(KeyModifiers::CONTROL)
-            && event.code == KeyCode::Char('b')
-        {
+        } else if self.prefix.matches(&event) {
             self.prefix_active = true;
             // Ctrl-b itself is consumed; do not forward to PTY
             (None, false)
@@ -78,34 +158,38 @@ impl KeybindingState {
 
     fn map_prefix_key(code: KeyCode) -> Option<Action> {
         match code {
-            // Pane splitting (Story 1.2)
+            // Pane splitting
             KeyCode::Char('\\') => Some(Action::SplitHorizontal),
             KeyCode::Char('-') => Some(Action::SplitVertical),
-            // Pane navigation lowercase (Story 1.3)
+            // Pane navigation lowercase
             KeyCode::Char('h') => Some(Action::FocusLeft),
             KeyCode::Char('j') => Some(Action::FocusDown),
             KeyCode::Char('k') => Some(Action::FocusUp),
             KeyCode::Char('l') => Some(Action::FocusRight),
-            // Pane resize uppercase (Story 1.3)
+            // Pane resize uppercase
             KeyCode::Char('H') => Some(Action::ResizeLeft),
             KeyCode::Char('J') => Some(Action::ResizeDown),
             KeyCode::Char('K') => Some(Action::ResizeUp),
             KeyCode::Char('L') => Some(Action::ResizeRight),
-            // Window management (Story 1.4)
+            // Window management
             KeyCode::Char('c') => Some(Action::NewWindow),
             KeyCode::Char('n') => Some(Action::NextWindow),
             KeyCode::Char('p') => Some(Action::PrevWindow),
             KeyCode::Char(c @ '1'..='9') => Some(Action::SwitchWindow((c as u8 - b'0') as usize)),
             // Focus cycle (tmux 'o')
             KeyCode::Char('o') => Some(Action::FocusNextPane),
-            // Session management (Story 1.5)
+            // Session management
             KeyCode::Char('d') => Some(Action::Detach),
-            // Pane zoom (Story 1.6)
+            // Pane zoom
             KeyCode::Char('z') => Some(Action::ToggleZoom),
-            // Scroll/copy mode (Story 1.7)
+            // Scroll/copy mode
             KeyCode::Char('[') => Some(Action::EnterScrollMode),
-            // Config hot reload (Story 1.8)
+            // Config hot reload
             KeyCode::Char('r') => Some(Action::ReloadConfig),
+            KeyCode::Char(',') => Some(Action::RenameWindow),
+            KeyCode::Char('t') => Some(Action::SendTask),
+            KeyCode::Char('T') => Some(Action::SendTaskAuto),
+            KeyCode::Char('?') => Some(Action::ShowHelp),
             // Unknown prefix sequence — silently consumed
             _ => None,
         }
@@ -118,6 +202,26 @@ impl Default for KeybindingState {
     }
 }
 
+/// Key bindings shown by `Ctrl-b ?`, as (keys after the prefix, description).
+pub const HELP_ENTRIES: &[(&str, &str)] = &[
+    ("\\", "Split pane left/right"),
+    ("-", "Split pane top/bottom"),
+    ("h j k l", "Move focus between panes"),
+    ("H J K L", "Resize the focused pane"),
+    ("o", "Focus the next pane"),
+    ("z", "Zoom the focused pane"),
+    ("[", "Scroll mode (q or Esc to leave)"),
+    ("c", "New window"),
+    ("n / p", "Next / previous window"),
+    ("1-9", "Go to window N"),
+    (",", "Rename the current window"),
+    ("t", "Send a task to the focused agent"),
+    ("T", "Send a task (BMUX picks the agent)"),
+    ("r", "Reload config.toml"),
+    ("d", "Detach (the session keeps running)"),
+    ("?", "Show this help"),
+];
+
 /// Convert a crossterm `KeyEvent` into the raw byte sequence a shell expects.
 /// Handles printable ASCII, control characters, and common escape sequences.
 pub fn key_event_to_bytes(event: KeyEvent) -> Vec<u8> {
@@ -127,6 +231,9 @@ pub fn key_event_to_bytes(event: KeyEvent) -> Vec<u8> {
             let c = c.to_ascii_lowercase();
             if c.is_ascii_lowercase() {
                 return vec![c as u8 - b'a' + 1];
+            }
+            if c == ' ' {
+                return vec![0];
             }
         }
     }

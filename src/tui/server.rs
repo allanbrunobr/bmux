@@ -1,4 +1,4 @@
-/// Session daemon server (Story 1.5).
+/// Session daemon server.
 ///
 /// Invoked via `bmux --daemon --session <name>`.
 /// - Manages session state (windows, panes, PTYs)
@@ -11,8 +11,11 @@ use anyhow::Result;
 use std::{
     collections::HashMap,
     path::PathBuf,
-    sync::{Arc, Mutex as StdMutex},
-    time::Duration,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex as StdMutex,
+    },
+    time::{Duration, Instant},
 };
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
@@ -25,6 +28,7 @@ use crate::agents::adapter::AgentConfig;
 use crate::agents::commands::agent_type_icon;
 use crate::agents::registry::AgentRegistry;
 use crate::agents::runtime::AgentRuntime;
+use crate::agents::usage::{TranscriptTracker, UsageTotals};
 use crate::config::settings::BmuxConfig;
 use crate::orchestration::message_bus::{MessageBus, MessageType, ResultPayload};
 use crate::orchestration::task_router::{self, TaskRouter};
@@ -36,7 +40,7 @@ use crate::workflow::yaml_parser::WorkflowParser;
 use super::{
     keybindings::Action,
     layout::ResizeDir,
-    protocol::{ClientMessage, ServerMessage, SessionSnapshot},
+    protocol::{AgentBadge, ClientMessage, ServerMessage, SessionSnapshot},
     session::{meta_path, socket_path, Session, SessionMeta},
     session_auth::{self, SessionAuth, SignedClientFrame, SignedServerFrame},
 };
@@ -53,7 +57,26 @@ struct DaemonState {
     session_auth: Arc<SessionAuth>,
     session_name: String,
     ipc_socket_path: PathBuf,
+    /// Transcript trackers for agents whose usage BMUX can measure.
+    usage: Mutex<HashMap<String, UsageWatch>>,
+    /// Agent badges for the status bar, refreshed by the usage poller.
+    badges: StdMutex<Vec<AgentBadge>>,
+    /// Set when `badges` changed and TUI clients need a new frame.
+    badges_dirty: AtomicBool,
 }
+
+/// Usage tracking state for one agent.
+struct UsageWatch {
+    tracker: TranscriptTracker,
+    /// Turns already matched to tasks.
+    turns_seen: u64,
+    /// Totals at the end of the previous turn (for per-task deltas).
+    at_last_turn: UsageTotals,
+    turn_started: Instant,
+}
+
+/// How often agent transcripts are polled for usage.
+const USAGE_POLL_INTERVAL: Duration = Duration::from_millis(1000);
 
 pub struct DaemonServer {
     name: String,
@@ -76,6 +99,8 @@ impl DaemonServer {
         );
 
         let bmux_config = BmuxConfig::load().unwrap_or_default();
+        let mut session = session;
+        apply_tui_config(&mut session, &bmux_config);
         let bus = Arc::new(MessageBus::new(name)?);
         let ipc_socket_path = bus.socket_path().clone();
         let task_router = Arc::new(TaskRouter::new(bus, 300));
@@ -104,6 +129,9 @@ impl DaemonServer {
                 session_auth,
                 session_name: name.to_string(),
                 ipc_socket_path,
+                usage: Mutex::new(HashMap::new()),
+                badges: StdMutex::new(Vec::new()),
+                badges_dirty: AtomicBool::new(false),
             }),
             socket_path: socket_path(name),
             meta_path: meta_path(name),
@@ -124,6 +152,7 @@ impl DaemonServer {
         self.state.task_router.message_bus().start().await?;
         spawn_result_subscriber(Arc::clone(&self.state.task_router));
         spawn_task_dispatch_subscriber(Arc::clone(&self.state));
+        spawn_usage_poller(Arc::clone(&self.state));
 
         {
             let store = crate::orchestration::context_store::SharedContextStore::from_arc(
@@ -146,9 +175,14 @@ impl DaemonServer {
                 loop {
                     tick.tick().await;
                     let (has_output, snapshot) = {
-                        let sess = state.session.lock().await;
+                        let mut sess = state.session.lock().await;
                         let out = sess.poll_output();
-                        (out, build_snapshot(&sess))
+                        let flash_expired = sess.expire_status_flash();
+                        let badges_changed = state.badges_dirty.swap(false, Ordering::AcqRel);
+                        (
+                            out || flash_expired || badges_changed,
+                            build_snapshot(&sess, &state),
+                        )
                     };
                     if has_output {
                         if let Ok(frame) = session_auth::sign_server(
@@ -259,6 +293,7 @@ async fn handle_client(
             | ClientMessage::ContextDump
             | ClientMessage::WorkflowRun { .. }
             | ClientMessage::WorkflowStatus { .. }
+            | ClientMessage::ConfigReload
     );
 
     // Drag state for mouse border resize (per-client)
@@ -280,7 +315,7 @@ async fn handle_client(
 
         // CLI queries that mutate session state (AgentSpawn, AgentKill)
         // must broadcast updated snapshot to all TUI clients.
-        let snap = build_snapshot(&*state.session.lock().await);
+        let snap = build_snapshot(&*state.session.lock().await, &state);
         if let Ok(frame) = session_auth::sign_server(&auth, ServerMessage::State(snap)) {
             let _ = broadcast_tx.send(Arc::new(frame));
         }
@@ -304,7 +339,7 @@ async fn handle_client(
     // Now send initial state
     {
         let sess = state.session.lock().await;
-        let snap = build_snapshot(&sess);
+        let snap = build_snapshot(&sess, &state);
         let line = encode_signed_server(&auth, ServerMessage::State(snap))?;
         write_half.write_all(line.as_bytes()).await?;
     }
@@ -354,7 +389,7 @@ async fn handle_client(
                                         write_half.write_all(line.as_bytes()).await?;
                                     }
                                     HandleResult::Ok => {
-                                        let snap = build_snapshot(&*state.session.lock().await);
+                                        let snap = build_snapshot(&*state.session.lock().await, &state);
                                         let line = encode_signed_server(&auth, ServerMessage::State(snap))?;
                                         write_half.write_all(line.as_bytes()).await?;
                                     }
@@ -429,19 +464,28 @@ async fn handle_client_message(
                 Action::ToggleZoom => sess.toggle_zoom(),
                 Action::EnterScrollMode => sess.enter_scroll_mode(),
                 Action::ReloadConfig => {
-                    let path = crate::config::default_config_path();
-                    use crate::tui::status_bar::StatusMessage;
-                    match BmuxConfig::hot_reload(&path) {
-                        Ok(cfg) => {
-                            *state.bmux_config.lock().expect("config mutex") = cfg;
-                            sess.set_status_flash(StatusMessage::ConfigReloaded);
-                        }
-                        Err(e) => {
-                            sess.set_status_flash(StatusMessage::ConfigError(e.to_string()));
-                        }
-                    }
+                    let _ = reload_config(state, &mut sess);
                 }
+                // Prompts and the help overlay live in the client.
+                Action::RenameWindow
+                | Action::SendTask
+                | Action::SendTaskAuto
+                | Action::ShowHelp => {}
             }
+        }
+        ClientMessage::RenameWindow { name } => {
+            state.session.lock().await.rename_active_window(&name);
+        }
+        ClientMessage::ConfigReload => {
+            let mut sess = state.session.lock().await;
+            let data = match reload_config(state, &mut sess) {
+                Ok(()) => format!(
+                    "Config reloaded from {}",
+                    crate::config::default_config_path().display()
+                ),
+                Err(e) => format!("Error: {e}"),
+            };
+            return Ok(HandleResult::Reply(ServerMessage::QueryResult { data }));
         }
         ClientMessage::GetState => {} // state snapshot is sent after this returns
         ClientMessage::MouseClick { col, row } => {
@@ -490,7 +534,7 @@ async fn handle_client_message(
                     AgentRuntime::new(&bmux_config, &state.envelope, &state.ipc_socket_path);
                 let ipc_key = state.task_router.message_bus().hmac_key_bytes();
 
-                let config = if agent_type == "custom" {
+                let mut config = if agent_type == "custom" {
                     match bmux_config.agents.get_custom(&name) {
                         Some(s) => AgentConfig {
                             binary: s.binary,
@@ -515,10 +559,12 @@ async fn handle_client_message(
                     return Ok(HandleResult::Reply(ServerMessage::QueryResult { data }));
                 }
 
+                let session_id = prepare_usage_tracking(&agent_type, &mut config);
                 let agent_spawn =
                     runtime.build_pty_command(&name, &agent_type, &config, Some(ipc_key));
-                (agent_spawn, config)
+                (agent_spawn, (config, session_id))
             };
+            let (config, usage_session) = config;
 
             // Split window and spawn structured PTY command — session lock released after block
             let (pane_id, child_pid) = {
@@ -545,6 +591,21 @@ async fn handle_client_message(
                     info.pid = child_pid;
                 }
             } // agents lock dropped here
+
+            if let Some(session_id) = usage_session {
+                if let Some(tracker) = TranscriptTracker::for_claude_session(&session_id, cost) {
+                    state.usage.lock().await.insert(
+                        name.clone(),
+                        UsageWatch {
+                            tracker,
+                            turns_seen: 0,
+                            at_last_turn: UsageTotals::default(),
+                            turn_started: Instant::now(),
+                        },
+                    );
+                }
+            }
+            refresh_badges(state).await;
 
             // Register in TaskRouter (no lock contention)
             state
@@ -586,19 +647,25 @@ async fn handle_client_message(
                 let data = "No agents running. Use `bmux agent spawn` to start one.".to_string();
                 return Ok(HandleResult::Reply(ServerMessage::QueryResult { data }));
             }
+            let model_w = agents
+                .iter()
+                .map(|a| a.model.chars().count())
+                .max()
+                .unwrap_or(0)
+                .max(5);
             let mut lines = vec![format!(
-                "{:<15} {:<18} {:<20} {:<10} {:>10}",
+                "{:<15} {:<18} {:<model_w$} {:<8} {:>8}",
                 "NAME", "TYPE", "MODEL", "STATUS", "COST"
             )];
             for info in &agents {
                 lines.push(format!(
-                    "{:<15} {} {:<15} {:<20} {:<10} {:>10}",
+                    "{:<15} {} {:<15} {:<model_w$} {:<8} {:>8}",
                     info.name,
                     info.type_icon(),
                     info.agent_type,
                     info.model,
                     info.status.label(),
-                    format!("${:.6}", info.cost_usd),
+                    format!("${:.4}", info.cost_usd),
                 ));
             }
             let data = lines.join("\n");
@@ -648,6 +715,8 @@ async fn handle_client_message(
                 }
             }
             state.task_router.handle_agent_crash(&name).await;
+            state.usage.lock().await.remove(&name);
+            refresh_badges(state).await;
             if !agent_type.is_empty() {
                 let _ = state.envelope.log_agent_killed(&name, &agent_type);
             }
@@ -709,7 +778,7 @@ async fn handle_client_message(
                         "{:<10} {:<15} {:<12} {}",
                         t.id,
                         t.destination,
-                        t.status,
+                        t.status.to_string(),
                         t.submitted_at.format("%H:%M:%S"),
                     ));
                 }
@@ -836,8 +905,202 @@ async fn handle_client_message(
 
 // ── Snapshot builder ──────────────────────────────────────────────────────────
 
-fn build_snapshot(sess: &Session) -> SessionSnapshot {
-    sess.snapshot()
+fn build_snapshot(sess: &Session, state: &DaemonState) -> SessionSnapshot {
+    let mut snap = sess.snapshot();
+    snap.agents = state.badges.lock().expect("badges mutex").clone();
+    snap
+}
+
+// ── Config ────────────────────────────────────────────────────────────────────
+
+/// Apply the `[tui]` settings that the daemon owns.
+fn apply_tui_config(sess: &mut Session, cfg: &BmuxConfig) {
+    crate::tui::pane::set_default_shell(Some(cfg.shell().to_string()));
+    if let Err(e) = sess.set_status_bar_visible(cfg.tui.status_bar) {
+        tracing::warn!("Failed to resize panes for status bar change: {e}");
+    }
+}
+
+/// Re-read config.toml, apply it and flash the result in the status bar.
+fn reload_config(state: &DaemonState, sess: &mut Session) -> std::result::Result<(), String> {
+    use crate::tui::status_bar::StatusMessage;
+    let path = crate::config::default_config_path();
+    match BmuxConfig::hot_reload(&path) {
+        Ok(cfg) => {
+            apply_tui_config(sess, &cfg);
+            *state.bmux_config.lock().expect("config mutex") = cfg;
+            sess.set_status_flash(StatusMessage::ConfigReloaded);
+            Ok(())
+        }
+        Err(e) => {
+            sess.set_status_flash(StatusMessage::ConfigError(e.clone()));
+            Err(e)
+        }
+    }
+}
+
+// ── Usage tracking ────────────────────────────────────────────────────────────
+
+/// For Claude Code, start the agent with a known `--session-id` so BMUX can
+/// find its transcript. Returns the session ID, or `None` when usage cannot be
+/// tracked (other agent types, or the user already passes a session flag).
+fn prepare_usage_tracking(agent_type: &str, config: &mut AgentConfig) -> Option<String> {
+    if agent_type != "claude-code" {
+        return None;
+    }
+    let has_session_flag = config.args.iter().any(|a| {
+        matches!(
+            a.as_str(),
+            "--session-id" | "--resume" | "-r" | "--continue" | "-c"
+        ) || a.starts_with("--session-id=")
+            || a.starts_with("--resume=")
+    });
+    if has_session_flag {
+        return None;
+    }
+    let session_id = uuid::Uuid::new_v4().to_string();
+    config.args.push("--session-id".to_string());
+    config.args.push(session_id.clone());
+    Some(session_id)
+}
+
+/// Poll agent transcripts, update usage and status, and finish tasks when an
+/// agent completes a turn.
+fn spawn_usage_poller(state: Arc<DaemonState>) {
+    tokio::spawn(async move {
+        let mut tick = interval(USAGE_POLL_INTERVAL);
+        loop {
+            tick.tick().await;
+            poll_usage_once(&state).await;
+        }
+    });
+}
+
+/// A finished turn to report to the task router.
+struct FinishedTurn {
+    agent: String,
+    content: String,
+    tokens: u64,
+    cost: f64,
+    duration_ms: u64,
+}
+
+async fn poll_usage_once(state: &DaemonState) {
+    let mut updates: Vec<(String, UsageTotals, bool)> = Vec::new();
+    let mut finished: Vec<FinishedTurn> = Vec::new();
+    {
+        let mut usage = state.usage.lock().await;
+        for (name, watch) in usage.iter_mut() {
+            let was_working = watch.tracker.is_working();
+            watch.tracker.poll();
+            let totals = watch.tracker.current_totals();
+            let working = watch.tracker.is_working();
+            if working && !was_working {
+                watch.turn_started = Instant::now();
+            }
+            let turns = watch.tracker.completed_turns();
+            if turns > watch.turns_seen {
+                watch.turns_seen = turns;
+                finished.push(FinishedTurn {
+                    agent: name.clone(),
+                    content: watch
+                        .tracker
+                        .last_assistant_text()
+                        .unwrap_or_default()
+                        .to_string(),
+                    tokens: totals
+                        .total_tokens()
+                        .saturating_sub(watch.at_last_turn.total_tokens()),
+                    cost: (totals.cost_usd - watch.at_last_turn.cost_usd).max(0.0),
+                    duration_ms: watch.turn_started.elapsed().as_millis() as u64,
+                });
+                watch.at_last_turn = totals.clone();
+            }
+            updates.push((name.clone(), totals, working));
+        }
+    }
+
+    if !updates.is_empty() {
+        use crate::agents::adapter::AgentStatus;
+        let mut reg = state.agents.lock().await;
+        for (name, totals, working) in &updates {
+            let _ = reg.set_usage(
+                name,
+                totals.total_tokens(),
+                totals.cost_usd,
+                totals.model.as_deref(),
+            );
+            let status = if *working {
+                AgentStatus::Working
+            } else {
+                AgentStatus::Idle
+            };
+            let _ = reg.set_status(name, status);
+        }
+    }
+
+    for turn in finished {
+        if let Some(task_id) = state.task_router.active_task_full_id(&turn.agent).await {
+            let payload = ResultPayload {
+                content: turn.content,
+                tokens_used: turn.tokens,
+                cost_usd: turn.cost,
+                duration_ms: turn.duration_ms,
+                task_id: Some(task_id.clone()),
+            };
+            if let Err(e) = state.task_router.handle_result(&task_id, payload).await {
+                tracing::warn!(agent = %turn.agent, "Failed to complete task from transcript: {e}");
+            }
+        }
+    }
+
+    refresh_badges(state).await;
+}
+
+/// Rebuild the status bar badges from the registry.
+async fn refresh_badges(state: &DaemonState) {
+    let tracked: Vec<String> = state.usage.lock().await.keys().cloned().collect();
+    let busy = {
+        let map = state.task_router.message_bus().agent_status();
+        let map = map.read().await;
+        map.iter()
+            .filter(|(_, s)| matches!(s, crate::agents::adapter::AgentStatus::Working))
+            .map(|(k, _)| k.clone())
+            .collect::<Vec<_>>()
+    };
+    let mut badges: Vec<AgentBadge> = {
+        let reg = state.agents.lock().await;
+        reg.list()
+            .into_iter()
+            .map(|info| {
+                let cost_tracked = tracked.contains(&info.name);
+                // Shell agents get keystrokes and never report completion, so
+                // an "active" task says nothing about whether they are busy.
+                let status =
+                    if !cost_tracked && info.agent_type != "shell" && busy.contains(&info.name) {
+                        "working".to_string()
+                    } else {
+                        info.status.label()
+                    };
+                AgentBadge {
+                    name: info.name.clone(),
+                    agent_type: info.agent_type.clone(),
+                    model: info.model.clone(),
+                    status,
+                    tokens: info.tokens_used,
+                    cost_usd: info.cost_usd,
+                    cost_tracked,
+                    pane_id: info.pane_id,
+                }
+            })
+            .collect()
+    };
+    badges.sort_by(|a, b| a.name.cmp(&b.name));
+    let mut current = state.badges.lock().expect("badges mutex");
+    if *current != badges {
+        *current = badges;
+        state.badges_dirty.store(true, Ordering::Release);
+    }
 }
 
 /// Deliver sanitized task content to an agent's PTY pane.

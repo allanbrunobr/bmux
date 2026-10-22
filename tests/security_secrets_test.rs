@@ -1,4 +1,4 @@
-// tests/security_secrets_test.rs — Integration tests for Story 6.2
+// tests/security_secrets_test.rs — integration tests for the secrets manager
 // Secrets Management
 
 use bmux::security::secrets::{check_permissions, fix_permissions, SecretsManager};

@@ -1,4 +1,4 @@
-// tests/security_hmac_test.rs — Integration tests for HMAC (Story 6.x)
+// tests/security_hmac_test.rs — integration tests for HMAC
 
 use bmux::security::hmac::{generate_key, sign_message, verify_message, HmacError};
 

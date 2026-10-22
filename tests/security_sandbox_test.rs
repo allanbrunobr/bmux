@@ -1,4 +1,4 @@
-// tests/security_sandbox_test.rs — Integration tests for Story 6.1
+// tests/security_sandbox_test.rs — integration tests for the sandbox
 // Agent Filesystem Sandboxing
 
 use bmux::security::sandbox::{apply_sandbox, SandboxMode};

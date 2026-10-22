@@ -241,7 +241,7 @@ impl WorkflowEngine {
     /// Execute the DAG: parallel-wave scheduling.
     ///
     /// At each iteration we find all steps whose dependencies are completed
-    /// and execute them concurrently (Story 5.3).
+    /// and execute them concurrently.
     async fn execute_dag(
         &self,
         dag: &WorkflowDag,
@@ -283,7 +283,7 @@ impl WorkflowEngine {
                 self.save_run(run_id, &r)?;
             }
 
-            // Execute ready steps in parallel (Story 5.3)
+            // Execute ready steps in parallel
             let mut handles = Vec::new();
             for step_id in &ready {
                 let step = dag
@@ -408,7 +408,7 @@ impl WorkflowEngine {
             // Persist after each wave
             self.save_run(run_id, &run.lock().unwrap())?;
 
-            // Halt on failure (Story 5.2)
+            // Halt on failure
             if let Some(err) = wave_failed {
                 return Err(err);
             }
@@ -417,7 +417,7 @@ impl WorkflowEngine {
         Ok(())
     }
 
-    // ─── Status (Story 5.4) ───────────────────────────────────────────────────
+    // ─── Status ───────────────────────────────────────────────────
 
     /// Retrieve the status of a workflow run by ID.
     pub fn get_status(&self, run_id: &str) -> Result<Option<WorkflowRun>> {
@@ -449,7 +449,7 @@ fn resolve_template(
     template: &str,
     input: &HashMap<String, serde_json::Value>,
     context: &ContextStore,
-    _run_id: &str,
+    run_id: &str,
 ) -> String {
     let mut result = template.to_string();
 
@@ -468,7 +468,13 @@ fn resolve_template(
                     }
                 })
                 .unwrap_or_default(),
-            "context" => context.get(&key).unwrap_or(None).unwrap_or_default(),
+            "context" => context
+                .get(&key)
+                .unwrap_or(None)
+                .or_else(|| {
+                    run_scoped_key(&key, run_id).and_then(|k| context.get(&k).unwrap_or(None))
+                })
+                .unwrap_or_default(),
             _ => String::new(),
         };
         replacements.push((placeholder, replacement));
@@ -479,6 +485,17 @@ fn resolve_template(
         result = result.replace(&from, &to);
     }
     result
+}
+
+/// `workflow:<step>:output` is shorthand for this run's
+/// `workflow:<run_id>:<step>:output`, so a workflow file can use the output of
+/// an earlier step without knowing the run id.
+fn run_scoped_key(key: &str, run_id: &str) -> Option<String> {
+    let step = key.strip_prefix("workflow:")?.strip_suffix(":output")?;
+    if step.is_empty() || step.contains(':') {
+        return None;
+    }
+    Some(format!("workflow:{run_id}:{step}:output"))
 }
 
 fn extract_placeholders(template: &str) -> Vec<(String, String, String)> {
@@ -575,7 +592,7 @@ mod tests {
             .unwrap()
     }
 
-    // ── Story 5.2: parameter injection ───────────────────────────────────────
+    // ── parameter injection ───────────────────────────────────────
 
     #[serial]
     #[test]
@@ -611,6 +628,25 @@ mod tests {
 
     #[serial]
     #[test]
+    fn test_resolve_template_step_output_shorthand_uses_current_run() {
+        let dir = TempDir::new().unwrap();
+        let ctx = ContextStore::open("tmpl4", dir.path()).unwrap();
+        ctx.set("workflow:run1:design:output", "old run", None)
+            .unwrap();
+        ctx.set("workflow:run2:design:output", "design output", None)
+            .unwrap();
+
+        let result = resolve_template(
+            "Implement: {{ context.workflow:design:output }}",
+            &HashMap::new(),
+            &ctx,
+            "run2",
+        );
+        assert_eq!(result, "Implement: design output");
+    }
+
+    #[serial]
+    #[test]
     fn test_resolve_template_missing_key_resolves_empty() {
         let dir = TempDir::new().unwrap();
         let ctx = ContextStore::open("tmpl3", dir.path()).unwrap();
@@ -623,7 +659,7 @@ mod tests {
         assert_eq!(result, "Hello ");
     }
 
-    // ── Story 5.2: sequential execution ──────────────────────────────────────
+    // ── sequential execution ──────────────────────────────────────
 
     #[tokio::test]
     async fn test_single_step_waits_for_task_result() {
@@ -717,7 +753,7 @@ steps:
         assert_eq!(status.status, WorkflowRunStatus::Completed);
     }
 
-    // ── Story 5.3: parallel execution ────────────────────────────────────────
+    // ── parallel execution ────────────────────────────────────────
 
     #[tokio::test]
     async fn test_parallel_steps_both_complete() {
@@ -791,7 +827,7 @@ steps:
         assert!(run.steps.iter().all(|s| s.status == StepStatus::Completed));
     }
 
-    // ── Story 5.4: status & monitoring ───────────────────────────────────────
+    // ── status & monitoring ───────────────────────────────────────
 
     #[tokio::test]
     async fn test_get_status_after_completion() {

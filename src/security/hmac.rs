@@ -1,10 +1,10 @@
 // src/security/hmac.rs — HMAC-SHA256 IPC message authentication
 //
-// Used by the message bus (wt4) to sign and verify all IPC messages,
+// Used by the message bus to sign and verify all IPC messages,
 // preventing tampering and injection attacks.
 //
-// Integration contract: wt4's MessageBus calls `sign_message` before sending
-// and `verify_message` on receipt. wt5 provides this module.
+// Integration contract: MessageBus calls `sign_message` before sending
+// and `verify_message` on receipt.
 
 use ring::hmac;
 use ring::rand::{SecureRandom, SystemRandom};

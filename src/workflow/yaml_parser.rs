@@ -264,7 +264,7 @@ impl WorkflowParser {
 
     // ─── Dry-run summary ──────────────────────────────────────────────────────
 
-    /// Produce a dry-run summary string (Story 5.1).
+    /// Produce a dry-run summary string.
     pub fn dry_run_summary(
         &self,
         dag: &WorkflowDag,
@@ -326,7 +326,7 @@ impl WorkflowParser {
 
     // ─── Workflow list ────────────────────────────────────────────────────────
 
-    /// List available workflows in a directory (Story 5.1).
+    /// List available workflows in a directory.
     pub fn list_workflows(&self, dir: &str) -> Result<Vec<WorkflowSummary>> {
         let path = Path::new(dir);
         if !path.exists() {
@@ -460,7 +460,7 @@ steps:
         WorkflowParser::new()
     }
 
-    // ── Story 5.1: parsing ────────────────────────────────────────────────────
+    // ── parsing ────────────────────────────────────────────────────
 
     #[test]
     fn test_parse_valid_workflow() {
@@ -546,7 +546,7 @@ steps: []
         assert!(matches!(err, ParseError::NoSteps));
     }
 
-    // ── Story 5.1: agent type validation ────────────────────────────────────
+    // ── agent type validation ────────────────────────────────────
 
     #[test]
     fn test_unknown_agent_type_rejected() {
@@ -578,7 +578,7 @@ agents:
         parser().validate_agent_types(&dag, &settings).unwrap();
     }
 
-    // ── Story 5.1: dry-run summary ───────────────────────────────────────────
+    // ── dry-run summary ───────────────────────────────────────────
 
     #[test]
     fn test_dry_run_summary_contains_step_count() {

@@ -20,27 +20,31 @@ struct Cli {
 
 #[derive(Subcommand, Debug)]
 enum Commands {
-    /// Create a new named session and attach to it
+    /// Create a new session and attach to it
     New {
-        /// Session name
-        name: String,
+        /// Session name (default: the first free number, as in tmux)
+        name: Option<String>,
     },
-    /// Attach to an existing session
+    /// Attach to an existing session (the only one, when NAME is omitted)
     Attach {
         /// Session name
-        #[arg(short = 's')]
-        session: String,
+        name: Option<String>,
+        /// Session name (same as NAME)
+        #[arg(short = 's', conflicts_with = "name")]
+        session: Option<String>,
     },
     /// List all active sessions
     Ls,
     /// Kill a session and all its processes
     Kill {
         /// Session name
-        #[arg(short = 's')]
-        session: String,
+        name: Option<String>,
+        /// Session name (same as NAME)
+        #[arg(short = 's', conflicts_with = "name")]
+        session: Option<String>,
     },
 
-    // ── Agent management (Epic 2) ──────────────────────────────────────────
+    // ── Agent management ──────────────────────────────────────────
     /// Manage AI agents (spawn, list, status, kill)
     Agent {
         /// Session name (auto-detects if only one is running)
@@ -50,7 +54,7 @@ enum Commands {
         action: AgentCommands,
     },
 
-    // ── Task routing (Epic 3) ──────────────────────────────────────────────
+    // ── Task routing ──────────────────────────────────────────────
     /// Send and manage tasks for agents
     Task {
         /// Session name
@@ -60,7 +64,7 @@ enum Commands {
         action: TaskCommands,
     },
 
-    // ── Shared context (Epic 4) ────────────────────────────────────────────
+    // ── Shared context ────────────────────────────────────────────
     /// Read/write shared context store
     Context {
         /// Session name
@@ -70,7 +74,7 @@ enum Commands {
         action: ContextCommands,
     },
 
-    // ── Workflow orchestration (Epic 5) ────────────────────────────────────
+    // ── Workflow orchestration ────────────────────────────────────
     /// Run and manage multi-agent workflows
     Workflow {
         /// Session name
@@ -80,14 +84,17 @@ enum Commands {
         action: WorkflowCommands,
     },
 
-    // ── Configuration (Story 1.8) ──────────────────────────────────────────
-    /// Show or validate configuration
+    // ── Configuration ──────────────────────────────────────────
+    /// Show, validate or reload configuration
     Config {
+        /// Session name for `config reload`
+        #[arg(short = 's', long, global = true)]
+        session: Option<String>,
         #[command(subcommand)]
         action: ConfigCommands,
     },
 
-    // ── Data management (Story 6.3) ────────────────────────────────────────
+    // ── Data management ────────────────────────────────────────
     /// Manage local BMUX data
     Data {
         #[command(subcommand)]
@@ -99,11 +106,15 @@ enum Commands {
 
 #[derive(Subcommand, Debug)]
 enum AgentCommands {
-    /// Spawn an AI agent
+    /// Spawn an AI agent in a new pane
     Spawn {
-        /// Agent type (claude-code, opencode, pi, shell, custom)
-        #[arg(long = "type")]
-        agent_type: String,
+        /// Agent type: claude-code (alias: claude), opencode, pi, gemini, shell,
+        /// or a custom [agents.<name>] entry. Default: `[agents] default_type`.
+        #[arg(value_name = "TYPE")]
+        type_arg: Option<String>,
+        /// Agent type (same as TYPE)
+        #[arg(long = "type", conflicts_with = "type_arg")]
+        agent_type: Option<String>,
         /// Agent name
         #[arg(long)]
         name: String,
@@ -112,6 +123,7 @@ enum AgentCommands {
         model: Option<String>,
     },
     /// List all active agents
+    #[command(visible_alias = "ls")]
     List,
     /// Show detailed agent status
     Status {
@@ -129,13 +141,13 @@ enum AgentCommands {
 
 #[derive(Subcommand, Debug)]
 enum TaskCommands {
-    /// Send a task to a specific agent or auto-route
+    /// Send a task to an agent: `task send dev "write tests"`, or
+    /// `task send --auto "write tests"` to let the router pick the agent
     Send {
-        /// Agent name (omit with --auto for auto-routing)
-        agent: Option<String>,
-        /// Task content
-        #[arg(last = true)]
-        content: String,
+        /// Agent name followed by the task text. With --auto, only the task text.
+        #[arg(required = true, num_args = 1.., value_name = "AGENT> <TEXT",
+              trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
         /// Auto-route to best available agent
         #[arg(long)]
         auto: bool,
@@ -144,6 +156,7 @@ enum TaskCommands {
         model: Option<String>,
     },
     /// List all tasks
+    #[command(visible_alias = "ls")]
     List,
     /// Cancel a queued task
     Cancel {
@@ -174,6 +187,7 @@ enum ContextCommands {
         key: String,
     },
     /// List all context keys
+    #[command(visible_alias = "ls")]
     List,
     /// Dump entire context as JSON
     Dump,
@@ -195,6 +209,7 @@ enum WorkflowCommands {
         dry_run: bool,
     },
     /// List available workflows
+    #[command(visible_alias = "ls")]
     List,
     /// Show workflow execution status
     Status {
@@ -211,6 +226,8 @@ enum ConfigCommands {
     Show,
     /// Validate config file without applying
     Validate,
+    /// Reload config.toml in a running session (same as `Ctrl-b r`)
+    Reload,
 }
 
 // ── Data subcommands ──────────────────────────────────────────────────────────
@@ -244,10 +261,16 @@ async fn main() -> Result<()> {
 
     match cli.command {
         None => bmux::tui::run_local("local").await,
-        Some(Commands::New { name }) => cmd_new(&name).await,
-        Some(Commands::Attach { session }) => cmd_attach(&session).await,
+        Some(Commands::New { name }) => {
+            let name = name.unwrap_or_else(next_session_name);
+            cmd_new(&name).await
+        }
+        Some(Commands::Attach { name, session }) => cmd_attach(name.or(session).as_deref()).await,
         Some(Commands::Ls) => cmd_ls(),
-        Some(Commands::Kill { session }) => cmd_kill(&session),
+        Some(Commands::Kill { name, session }) => match name.or(session) {
+            Some(name) => cmd_kill(&name),
+            None => anyhow::bail!("Specify the session to kill: `bmux kill <name>`."),
+        },
         Some(Commands::Agent { session, action }) => cmd_agent(session.as_deref(), action).await,
         Some(Commands::Task { session, action }) => cmd_task(session.as_deref(), action).await,
         Some(Commands::Context { session, action }) => {
@@ -256,13 +279,13 @@ async fn main() -> Result<()> {
         Some(Commands::Workflow { session, action }) => {
             cmd_workflow(session.as_deref(), action).await
         }
-        Some(Commands::Config { action }) => cmd_config(action),
+        Some(Commands::Config { session, action }) => cmd_config(session.as_deref(), action).await,
         Some(Commands::Data { action }) => cmd_data(action),
     }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Session commands (Epic 1)
+// Session commands
 // ═══════════════════════════════════════════════════════════════════════════════
 
 async fn cmd_new(name: &str) -> Result<()> {
@@ -278,12 +301,28 @@ async fn cmd_new(name: &str) -> Result<()> {
     }
 
     let exe = std::env::current_exe()?;
-    let _child = std::process::Command::new(&exe)
+    let mut daemon = std::process::Command::new(&exe);
+    daemon
         .args(["--daemon", "--session-name", name])
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .spawn()?;
+        .stderr(std::process::Stdio::null());
+    // Start the daemon in its own session so it survives when the terminal
+    // that created it is closed (it would get SIGHUP otherwise).
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        // SAFETY: setsid is async-signal-safe and runs in the child before exec.
+        unsafe {
+            daemon.pre_exec(|| {
+                if libc::setsid() == -1 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                Ok(())
+            });
+        }
+    }
+    let _child = daemon.spawn()?;
 
     let sock = socket_path(name);
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
@@ -300,12 +339,10 @@ async fn cmd_new(name: &str) -> Result<()> {
     bmux::tui::client::run_client(sock).await
 }
 
-async fn cmd_attach(name: &str) -> Result<()> {
-    use bmux::tui::session::socket_path;
-    let sock = socket_path(name);
-    if !sock.exists() {
-        anyhow::bail!("No session named '{}' is running.", name);
-    }
+async fn cmd_attach(name: Option<&str>) -> Result<()> {
+    // Same lookup as the other commands: name, then $BMUX_SESSION, then the
+    // only running session.
+    let sock = bmux::tui::ipc_client::resolve_session(name)?;
     bmux::tui::client::run_client(sock).await
 }
 
@@ -344,7 +381,7 @@ fn cmd_kill(name: &str) -> Result<()> {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Agent commands (Epic 2) — all queries go through session daemon IPC
+// Agent commands — all queries go through session daemon IPC
 // ═══════════════════════════════════════════════════════════════════════════════
 
 async fn cmd_agent(session: Option<&str>, action: AgentCommands) -> Result<()> {
@@ -355,14 +392,24 @@ async fn cmd_agent(session: Option<&str>, action: AgentCommands) -> Result<()> {
 
     let msg = match action {
         AgentCommands::Spawn {
+            type_arg,
             agent_type,
             name,
             model,
-        } => ClientMessage::AgentSpawn {
-            agent_type,
-            name,
-            model,
-        },
+        } => {
+            let agent_type = match type_arg.or(agent_type) {
+                Some(t) => t,
+                None => bmux::config::settings::BmuxConfig::load()
+                    .unwrap_or_default()
+                    .default_agent_type()
+                    .to_string(),
+            };
+            ClientMessage::AgentSpawn {
+                agent_type: normalize_agent_type(&agent_type),
+                name,
+                model,
+            }
+        }
         AgentCommands::List => ClientMessage::AgentList,
         AgentCommands::Status { name } => ClientMessage::AgentStatus { name },
         AgentCommands::Kill { name } => ClientMessage::AgentKill { name },
@@ -374,7 +421,7 @@ async fn cmd_agent(session: Option<&str>, action: AgentCommands) -> Result<()> {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Task commands (Epic 3) — all queries go through session daemon IPC
+// Task commands — all queries go through session daemon IPC
 // ═══════════════════════════════════════════════════════════════════════════════
 
 async fn cmd_task(session: Option<&str>, action: TaskCommands) -> Result<()> {
@@ -384,13 +431,8 @@ async fn cmd_task(session: Option<&str>, action: TaskCommands) -> Result<()> {
     let sock = resolve_session(session)?;
 
     let msg = match action {
-        TaskCommands::Send {
-            agent,
-            content,
-            auto,
-            model,
-        } => {
-            let agent = if auto { None } else { agent };
+        TaskCommands::Send { args, auto, model } => {
+            let (agent, content) = split_task_args(args, auto)?;
             ClientMessage::TaskSend {
                 agent,
                 content,
@@ -408,7 +450,7 @@ async fn cmd_task(session: Option<&str>, action: TaskCommands) -> Result<()> {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Context commands (Epic 4) — all queries go through session daemon IPC
+// Context commands — all queries go through session daemon IPC
 // ═══════════════════════════════════════════════════════════════════════════════
 
 async fn cmd_context(session: Option<&str>, action: ContextCommands) -> Result<()> {
@@ -434,7 +476,7 @@ async fn cmd_context(session: Option<&str>, action: ContextCommands) -> Result<(
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Workflow commands (Epic 5) — dry-run is local, execution goes through IPC
+// Workflow commands — dry-run is local, execution goes through IPC
 // ═══════════════════════════════════════════════════════════════════════════════
 
 async fn cmd_workflow(session: Option<&str>, action: WorkflowCommands) -> Result<()> {
@@ -450,6 +492,10 @@ async fn cmd_workflow(session: Option<&str>, action: WorkflowCommands) -> Result
             let parser = WorkflowParser::new();
             let settings = BmuxConfig::load().unwrap_or_default();
             let dag = parser.parse_file(&file)?;
+            // The daemon has its own working directory: send an absolute path.
+            let file = std::fs::canonicalize(&file)
+                .map(|p| p.to_string_lossy().into_owned())
+                .unwrap_or(file);
 
             if dry_run {
                 let summary = parser.dry_run_summary(&dag, &settings);
@@ -472,10 +518,11 @@ async fn cmd_workflow(session: Option<&str>, action: WorkflowCommands) -> Result
         }
         WorkflowCommands::List => {
             let parser = WorkflowParser::new();
-            let workflow_dir = dirs::config_dir()
-                .unwrap_or_default()
-                .join("bmux")
-                .join("workflows");
+            // ~/.config/bmux/workflows, next to config.toml
+            let workflow_dir = bmux::config::default_config_path()
+                .parent()
+                .map(|d| d.join("workflows"))
+                .unwrap_or_default();
             if !workflow_dir.exists() {
                 println!("No workflows directory found at {}", workflow_dir.display());
                 return Ok(());
@@ -502,13 +549,24 @@ async fn cmd_workflow(session: Option<&str>, action: WorkflowCommands) -> Result
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Config commands (Story 1.8)
+// Config commands
 // ═══════════════════════════════════════════════════════════════════════════════
 
-fn cmd_config(action: ConfigCommands) -> Result<()> {
+async fn cmd_config(session: Option<&str>, action: ConfigCommands) -> Result<()> {
     use bmux::config;
 
     match action {
+        ConfigCommands::Reload => {
+            use bmux::tui::ipc_client::{query, resolve_session};
+            use bmux::tui::protocol::ClientMessage;
+            let sock = resolve_session(session)?;
+            let result = query(&sock, ClientMessage::ConfigReload).await?;
+            println!("{}", result);
+            if result.starts_with("Error") {
+                std::process::exit(1);
+            }
+            Ok(())
+        }
         ConfigCommands::Show => {
             config::show_config();
             Ok(())
@@ -521,7 +579,7 @@ fn cmd_config(action: ConfigCommands) -> Result<()> {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Data commands (Story 6.3)
+// Data commands
 // ═══════════════════════════════════════════════════════════════════════════════
 
 fn cmd_data(action: DataCommands) -> Result<()> {
@@ -564,6 +622,52 @@ fn cmd_data(action: DataCommands) -> Result<()> {
 // Helpers
 // ═══════════════════════════════════════════════════════════════════════════════
 
+/// First number not used by a running session: "0", "1", ...
+fn next_session_name() -> String {
+    let taken: Vec<String> = bmux::tui::session::list_sessions()
+        .into_iter()
+        .map(|s| s.name)
+        .collect();
+    (0..)
+        .map(|n: u32| n.to_string())
+        .find(|n| !taken.contains(n))
+        .unwrap_or_else(|| "0".to_string())
+}
+
+/// Accept `claude` as a short name for `claude-code`.
+fn normalize_agent_type(agent_type: &str) -> String {
+    match agent_type {
+        "claude" => "claude-code".to_string(),
+        other => other.to_string(),
+    }
+}
+
+/// Split `task send` arguments into (agent, text). Without `--auto` the first
+/// argument is the agent; the remaining arguments are joined into the text.
+/// A `--` separator before the text (old syntax) is accepted and dropped.
+fn split_task_args(args: Vec<String>, auto: bool) -> Result<(Option<String>, String)> {
+    fn text(words: Vec<String>) -> String {
+        let skip = usize::from(words.first().is_some_and(|w| w == "--"));
+        words[skip..].join(" ")
+    }
+    if auto {
+        let content = text(args);
+        if content.trim().is_empty() {
+            anyhow::bail!("Task text is empty.");
+        }
+        return Ok((None, content));
+    }
+    let mut it = args.into_iter();
+    let agent = it.next().unwrap_or_default();
+    let content = text(it.collect());
+    if content.trim().is_empty() {
+        anyhow::bail!(
+            "Missing task text. Usage: bmux task send <agent> \"<text>\" or bmux task send --auto \"<text>\""
+        );
+    }
+    Ok((Some(agent), content))
+}
+
 #[cfg(unix)]
 fn send_sigterm(pid: u32) {
     let _ = std::process::Command::new("kill")
@@ -580,4 +684,75 @@ async fn run_daemon(name: &str) -> Result<()> {
     use bmux::tui::server::DaemonServer;
     let server = DaemonServer::new(name, 24, 80)?;
     server.run().await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parse(args: &[&str]) -> Cli {
+        Cli::try_parse_from(std::iter::once("bmux").chain(args.iter().copied())).unwrap()
+    }
+
+    fn strings(v: &[&str]) -> Vec<String> {
+        v.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn task_send_accepts_text_with_and_without_separator() {
+        for argv in [
+            &["task", "send", "dev", "write tests"][..],
+            &["task", "send", "dev", "--", "write tests"][..],
+            &["task", "send", "dev", "write", "tests"][..],
+        ] {
+            let Some(Commands::Task {
+                action: TaskCommands::Send { args, auto, .. },
+                ..
+            }) = parse(argv).command
+            else {
+                panic!("not a task send: {argv:?}");
+            };
+            assert_eq!(
+                split_task_args(args, auto).unwrap(),
+                (Some("dev".to_string()), "write tests".to_string())
+            );
+        }
+    }
+
+    #[test]
+    fn task_send_auto_uses_all_args_as_text() {
+        assert_eq!(
+            split_task_args(strings(&["fix", "the", "bug"]), true).unwrap(),
+            (None, "fix the bug".to_string())
+        );
+        assert!(split_task_args(strings(&["dev"]), false).is_err());
+    }
+
+    #[test]
+    fn agent_spawn_accepts_positional_type_and_alias() {
+        let Some(Commands::Agent {
+            action: AgentCommands::Spawn { type_arg, .. },
+            ..
+        }) = parse(&["agent", "spawn", "claude", "--name", "dev"]).command
+        else {
+            panic!("not an agent spawn");
+        };
+        assert_eq!(normalize_agent_type(&type_arg.unwrap()), "claude-code");
+        assert!(
+            Cli::try_parse_from(["bmux", "agent", "spawn", "--type", "pi", "--name", "x"]).is_ok()
+        );
+        assert!(Cli::try_parse_from(["bmux", "agent", "spawn", "--name", "x"]).is_ok());
+    }
+
+    #[test]
+    fn ls_aliases_and_positional_session_names() {
+        assert!(Cli::try_parse_from(["bmux", "agent", "ls"]).is_ok());
+        assert!(Cli::try_parse_from(["bmux", "task", "ls"]).is_ok());
+        assert!(Cli::try_parse_from(["bmux", "attach", "demo"]).is_ok());
+        assert!(Cli::try_parse_from(["bmux", "attach", "-s", "demo"]).is_ok());
+        assert!(Cli::try_parse_from(["bmux", "attach"]).is_ok());
+        assert!(Cli::try_parse_from(["bmux", "kill", "demo"]).is_ok());
+        assert!(Cli::try_parse_from(["bmux", "config", "reload"]).is_ok());
+        assert!(Cli::try_parse_from(["bmux", "new"]).is_ok());
+    }
 }

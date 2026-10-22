@@ -1,5 +1,5 @@
 // src/security/sandbox.rs — Agent filesystem sandboxing
-// Story 6.1: Agent Filesystem Sandboxing
+// Agent Filesystem Sandboxing
 //
 // Platform matrix:
 //   Linux 5.13+          → Landlock (landlock crate)

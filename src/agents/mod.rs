@@ -17,6 +17,7 @@ pub mod pi;
 pub mod registry;
 pub mod runtime;
 pub mod shell;
+pub mod usage;
 
 // Re-export key types for ergonomic use
 pub use adapter::{AgentAdapter, AgentConfig, AgentOutput, AgentStatus, Task};

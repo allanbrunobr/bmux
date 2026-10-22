@@ -1,7 +1,7 @@
 // AgentRegistry — manages spawned agents and their runtime state.
 //
 // Stores agent metadata and stats. Process handles are managed by each adapter.
-// Provides serialization for session persistence (Story 2.6).
+// Provides serialization for session persistence.
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -123,7 +123,7 @@ pub struct AggregateStats {
     pub session_seconds: u64,
 }
 
-/// Session snapshot for persistence (Story 2.6).
+/// Session snapshot for persistence.
 #[derive(Debug, Serialize, Deserialize)]
 struct RegistrySnapshot {
     agents: Vec<AgentSnapshot>,
@@ -187,6 +187,29 @@ impl AgentRegistry {
         info.tokens_used += tokens;
         info.cost_usd += cost;
         info.task_count += 1;
+        Ok(())
+    }
+
+    /// Replace an agent's usage totals with values measured from its transcript.
+    ///
+    /// Unlike [`record_usage`](Self::record_usage), this does not accumulate:
+    /// the tracker already holds running totals.
+    pub fn set_usage(
+        &mut self,
+        name: &str,
+        tokens: u64,
+        cost: f64,
+        model: Option<&str>,
+    ) -> anyhow::Result<()> {
+        let info = self
+            .agents
+            .get_mut(name)
+            .ok_or_else(|| anyhow::anyhow!("Agent '{}' not found", name))?;
+        info.tokens_used = tokens;
+        info.cost_usd = cost;
+        if let Some(m) = model {
+            info.model = m.to_string();
+        }
         Ok(())
     }
 

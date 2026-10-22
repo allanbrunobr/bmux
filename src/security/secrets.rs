@@ -1,5 +1,5 @@
 // src/security/secrets.rs — Secure API key management
-// Story 6.2: Secrets Management
+// Secrets Management
 //
 // Reads API keys from ~/.config/bmux/secrets.toml (must be chmod 0600).
 // Injects secrets into agent child processes via a file descriptor — never
@@ -81,9 +81,11 @@ impl SecretsManager {
         Ok(Self { keys: parsed.keys })
     }
 
-    /// Returns the default path `~/.config/bmux/secrets.toml`.
+    /// Returns the default path `~/.config/bmux/secrets.toml` (next to config.toml).
     pub fn default_path() -> Option<PathBuf> {
-        dirs::config_dir().map(|d| d.join("bmux").join("secrets.toml"))
+        crate::config::default_config_path()
+            .parent()
+            .map(|d| d.join("secrets.toml"))
     }
 
     /// Get the value of a secret by key name.
