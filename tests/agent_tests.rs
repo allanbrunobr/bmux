@@ -5,7 +5,7 @@ use bmux::agents::claude_code::ClaudeCodeAdapter;
 use bmux::agents::custom::CustomAdapter;
 use bmux::agents::opencode::OpenCodeAdapter;
 use bmux::agents::pi::PiAdapter;
-use bmux::agents::registry::{AgentInfo, AgentRegistry};
+use bmux::agents::registry::AgentRegistry;
 use bmux::agents::shell::ShellAdapter;
 
 // ─── AgentAdapter Trait & Shell Agent ───────────────────────────

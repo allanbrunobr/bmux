@@ -34,7 +34,7 @@ fn integration_scroll_full_workflow() {
 #[test]
 fn integration_history_limit_enforced() {
     let mut s = ScrollState::new();
-    assert!(
+    const _: () = assert!(
         DEFAULT_HISTORY_LIMIT >= 10_000,
         "AC: buffer must support at least 10,000 lines"
     );

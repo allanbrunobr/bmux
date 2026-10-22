@@ -351,8 +351,10 @@ mod tests {
 
     #[test]
     fn isolated_launch_uses_env_i() {
-        let mut security = SecurityConfig::default();
-        security.sandbox = "none".to_string();
+        let security = SecurityConfig {
+            sandbox: "none".to_string(),
+            ..Default::default()
+        };
         let env = SecurityEnvelope::new("test", PathBuf::from("/tmp/project"), security, false);
         let cmd = env.build_agent_launch_command(
             "arch",
