@@ -63,7 +63,11 @@ impl SharedContextStore {
     // ─── Agent output helpers (Story 4.2) ────────────────────────────────────
 
     /// Store an agent's last output at `agent:{id}:last_output` with TTL of 1 hour.
-    pub fn store_agent_output(&self, agent_id: &str, output: &str) -> Result<(), ContextStoreError> {
+    pub fn store_agent_output(
+        &self,
+        agent_id: &str,
+        output: &str,
+    ) -> Result<(), ContextStoreError> {
         let key = format!("agent:{agent_id}:last_output");
         self.inner.set(&key, output, Some(AGENT_OUTPUT_TTL_SECS))
     }
@@ -76,7 +80,12 @@ impl SharedContextStore {
 
     // ─── Generic KV access ───────────────────────────────────────────────────
 
-    pub fn set(&self, key: &str, value: &str, ttl_seconds: Option<u64>) -> Result<(), ContextStoreError> {
+    pub fn set(
+        &self,
+        key: &str,
+        value: &str,
+        ttl_seconds: Option<u64>,
+    ) -> Result<(), ContextStoreError> {
         self.inner.set(key, value, ttl_seconds)
     }
 
@@ -127,30 +136,26 @@ impl SharedContextStore {
     /// Handle a context request arriving via IPC and return a response.
     pub fn handle_request(&self, req: ContextRequest) -> ContextResponse {
         match req {
-            ContextRequest::Read { key } => {
-                match self.inner.get(&key) {
-                    Ok(val) => ContextResponse::Value(val),
-                    Err(e) => ContextResponse::Error(e.to_string()),
-                }
-            }
-            ContextRequest::Write { key, value, ttl_seconds } => {
-                match self.inner.set(&key, &value, ttl_seconds) {
-                    Ok(()) => ContextResponse::Ok,
-                    Err(e) => ContextResponse::Error(e.to_string()),
-                }
-            }
-            ContextRequest::List => {
-                match self.inner.list() {
-                    Ok(entries) => ContextResponse::List(entries),
-                    Err(e) => ContextResponse::Error(e.to_string()),
-                }
-            }
-            ContextRequest::Dump => {
-                match self.inner.dump_json() {
-                    Ok(json) => ContextResponse::DumpJson(json),
-                    Err(e) => ContextResponse::Error(e.to_string()),
-                }
-            }
+            ContextRequest::Read { key } => match self.inner.get(&key) {
+                Ok(val) => ContextResponse::Value(val),
+                Err(e) => ContextResponse::Error(e.to_string()),
+            },
+            ContextRequest::Write {
+                key,
+                value,
+                ttl_seconds,
+            } => match self.inner.set(&key, &value, ttl_seconds) {
+                Ok(()) => ContextResponse::Ok,
+                Err(e) => ContextResponse::Error(e.to_string()),
+            },
+            ContextRequest::List => match self.inner.list() {
+                Ok(entries) => ContextResponse::List(entries),
+                Err(e) => ContextResponse::Error(e.to_string()),
+            },
+            ContextRequest::Dump => match self.inner.dump_json() {
+                Ok(json) => ContextResponse::DumpJson(json),
+                Err(e) => ContextResponse::Error(e.to_string()),
+            },
         }
     }
 }
@@ -184,7 +189,9 @@ mod tests {
     #[test]
     fn test_store_and_read_agent_output() {
         let (store, _dir) = make_shared_store();
-        store.store_agent_output("arch", "design doc content").unwrap();
+        store
+            .store_agent_output("arch", "design doc content")
+            .unwrap();
         let out = store.read_agent_output("arch").unwrap();
         assert_eq!(out, Some("design doc content".to_string()));
     }

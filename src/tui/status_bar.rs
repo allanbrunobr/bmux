@@ -152,9 +152,7 @@ impl<'a> StatusBar<'a> {
         // Status message (config reload / error)
         if let Some(msg) = self.state.message.text() {
             let style = match &self.state.message {
-                StatusMessage::ConfigError(_) => {
-                    Style::default().fg(Color::White).bg(Color::Red)
-                }
+                StatusMessage::ConfigError(_) => Style::default().fg(Color::White).bg(Color::Red),
                 _ => Style::default().fg(Color::Black).bg(Color::Blue),
             };
             spans.push(Span::styled(format!(" {msg} "), style));
@@ -168,8 +166,7 @@ impl Widget for StatusBar<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
         // Fill the background
         for x in area.left()..area.right() {
-            buf[(x, area.top())]
-                .set_style(Style::default().fg(Color::White).bg(Color::DarkGray));
+            buf[(x, area.top())].set_style(Style::default().fg(Color::White).bg(Color::DarkGray));
         }
 
         let mut spans: Vec<Span> = Vec::new();
@@ -197,7 +194,9 @@ mod tests {
             })
             .unwrap();
         let buffer = terminal.backend().buffer().clone();
-        let row: String = (0..width).map(|x| buffer[(x, 0)].symbol().to_string()).collect();
+        let row: String = (0..width)
+            .map(|x| buffer[(x, 0)].symbol().to_string())
+            .collect();
         row
     }
 
@@ -205,7 +204,10 @@ mod tests {
     fn renders_session_name() {
         let state = StatusBarState::new("my-project");
         let row = render_status_bar(&state, 80);
-        assert!(row.contains("my-project"), "Expected session name in: {row:?}");
+        assert!(
+            row.contains("my-project"),
+            "Expected session name in: {row:?}"
+        );
     }
 
     #[test]
@@ -229,7 +231,10 @@ mod tests {
     fn no_scroll_indicator_when_not_in_scroll_mode() {
         let state = StatusBarState::default();
         let row = render_status_bar(&state, 80);
-        assert!(!row.contains("[SCROLL]"), "Should not contain [SCROLL]: {row:?}");
+        assert!(
+            !row.contains("[SCROLL]"),
+            "Should not contain [SCROLL]: {row:?}"
+        );
     }
 
     #[test]
@@ -244,7 +249,10 @@ mod tests {
     fn no_zoom_indicator_when_not_zoomed() {
         let state = StatusBarState::default();
         let row = render_status_bar(&state, 80);
-        assert!(!row.contains("[ZOOM]"), "Should not contain [ZOOM]: {row:?}");
+        assert!(
+            !row.contains("[ZOOM]"),
+            "Should not contain [ZOOM]: {row:?}"
+        );
     }
 
     #[test]
@@ -267,14 +275,20 @@ mod tests {
             row.contains("Config error"),
             "Expected 'Config error' in: {row:?}"
         );
-        assert!(row.contains("bad field"), "Expected error detail in: {row:?}");
+        assert!(
+            row.contains("bad field"),
+            "Expected error detail in: {row:?}"
+        );
     }
 
     #[test]
     fn no_message_when_none() {
         let state = StatusBarState::default();
         let row = render_status_bar(&state, 80);
-        assert!(!row.contains("Config"), "Should not show config message: {row:?}");
+        assert!(
+            !row.contains("Config"),
+            "Should not show config message: {row:?}"
+        );
     }
 
     // ── StatusMessage unit tests ─────────────────────────────────────────────

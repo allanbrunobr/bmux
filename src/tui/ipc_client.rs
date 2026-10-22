@@ -38,23 +38,22 @@ pub fn resolve_session(explicit: Option<&str>) -> Result<PathBuf> {
         if sock.exists() {
             return Ok(sock);
         }
-        anyhow::bail!(
-            "BMUX_SESSION='{}' but no such session is running.",
-            name
-        );
+        anyhow::bail!("BMUX_SESSION='{}' but no such session is running.", name);
     }
 
     // 3. Auto-detect single session
     let sessions = list_sessions();
     match sessions.len() {
-        0 => anyhow::bail!(
-            "No active bmux sessions. Start one with `bmux new <name>`."
-        ),
+        0 => anyhow::bail!("No active bmux sessions. Start one with `bmux new <name>`."),
         1 => Ok(sessions[0].socket_path.clone()),
         n => anyhow::bail!(
             "{n} sessions running. Specify which one with `-s <name>` or set BMUX_SESSION.\n\
              Active sessions: {}",
-            sessions.iter().map(|s| s.name.as_str()).collect::<Vec<_>>().join(", ")
+            sessions
+                .iter()
+                .map(|s| s.name.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
         ),
     }
 }
@@ -104,7 +103,9 @@ const QUERY_TIMEOUT: Duration = Duration::from_secs(5);
 pub async fn query(sock_path: &Path, msg: ClientMessage) -> Result<String> {
     timeout(QUERY_TIMEOUT, query_inner(sock_path, msg))
         .await
-        .map_err(|_| anyhow::anyhow!("Session query timed out after {}s", QUERY_TIMEOUT.as_secs()))?
+        .map_err(|_| {
+            anyhow::anyhow!("Session query timed out after {}s", QUERY_TIMEOUT.as_secs())
+        })?
 }
 
 async fn query_inner(sock_path: &Path, msg: ClientMessage) -> Result<String> {
@@ -144,9 +145,6 @@ mod tests {
     #[test]
     fn parses_session_name_from_socket_path() {
         let sock = PathBuf::from("/tmp/bmux-myproj.sock");
-        assert_eq!(
-            session_name_from_socket(&sock).as_deref(),
-            Some("myproj")
-        );
+        assert_eq!(session_name_from_socket(&sock).as_deref(), Some("myproj"));
     }
 }

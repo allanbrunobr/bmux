@@ -1,9 +1,9 @@
+use crate::security::agent_spawn::AgentPtySpawn;
 use anyhow::Result;
 use chrono::{DateTime, Utc};
-use crate::security::agent_spawn::AgentPtySpawn;
 use ratatui::{
-    Frame,
     layout::{Constraint, Direction, Layout as RatatuiLayout},
+    Frame,
 };
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -153,8 +153,7 @@ impl Session {
 
     pub fn prev_window(&mut self) {
         if !self.windows.is_empty() {
-            self.active_window =
-                (self.active_window + self.windows.len() - 1) % self.windows.len();
+            self.active_window = (self.active_window + self.windows.len() - 1) % self.windows.len();
         }
     }
 
@@ -187,10 +186,7 @@ impl Session {
 
     /// Capture a serializable snapshot for the daemon protocol.
     pub fn snapshot(&self) -> SessionSnapshot {
-        let status_message = self
-            .status_flash
-            .as_ref()
-            .and_then(|m| m.text());
+        let status_message = self.status_flash.as_ref().and_then(|m| m.text());
         SessionSnapshot {
             name: self.name.clone(),
             active_window: self.active_window,
@@ -213,10 +209,7 @@ impl Session {
         // Split vertically: content area + 1-row status bar
         let chunks = RatatuiLayout::default()
             .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Min(1),
-                Constraint::Length(1),
-            ])
+            .constraints([Constraint::Min(1), Constraint::Length(1)])
             .split(total);
 
         let content_area = chunks[0];
@@ -234,10 +227,7 @@ impl Session {
             active_window_idx: self.active_window,
             in_scroll_mode: active_win.scroll_active(),
             zoom: active_win.zoom_state(),
-            message: self
-                .status_flash
-                .clone()
-                .unwrap_or(StatusMessage::None),
+            message: self.status_flash.clone().unwrap_or(StatusMessage::None),
         };
         frame.render_widget(StatusBar::new(&status_state), status_area);
     }
@@ -260,7 +250,12 @@ pub struct SessionMeta {
 }
 
 impl SessionMeta {
-    pub fn new(name: &str, window_count: usize, socket_path: PathBuf, auth_key_hex: String) -> Self {
+    pub fn new(
+        name: &str,
+        window_count: usize,
+        socket_path: PathBuf,
+        auth_key_hex: String,
+    ) -> Self {
         Self {
             name: name.to_string(),
             pid: std::process::id(),

@@ -131,7 +131,7 @@ mod tests {
         let mut state = ZoomState::new();
         state.toggle(1);
         state.toggle(1); // un-zoom
-        // All panes visible again
+                         // All panes visible again
         assert!(state.is_pane_visible(1));
         assert!(state.is_pane_visible(2));
     }
@@ -170,7 +170,10 @@ mod tests {
         // Press Ctrl-b z again — restore all
         state.toggle(active);
         for &p in &panes {
-            assert!(state.is_pane_visible(p), "pane {p} should be visible after un-zoom");
+            assert!(
+                state.is_pane_visible(p),
+                "pane {p} should be visible after un-zoom"
+            );
         }
     }
 }

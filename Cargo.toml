@@ -4,8 +4,12 @@ version = "0.1.0"
 edition = "2021"
 rust-version = "1.78"
 description = "BMUX — AI-powered terminal multiplexer with agent orchestration"
-authors = ["Bruno Oliveira Silva"]
+authors = ["Allan Bruno de Oliveira Silva <allanbruno@gmail.com>"]
 license = "MIT"
+repository = "https://github.com/allanbrunobr/bmux"
+readme = "README.md"
+keywords = ["terminal", "multiplexer", "tui", "ai-agents", "llm"]
+categories = ["command-line-utilities"]
 
 [[bin]]
 name = "bmux"

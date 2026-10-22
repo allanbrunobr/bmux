@@ -76,11 +76,7 @@ pub fn resolve_agent_config(
         _ => spec.binary.to_string(),
     };
 
-    let mut args: Vec<String> = spec
-        .default_args
-        .iter()
-        .map(|s| (*s).to_string())
-        .collect();
+    let mut args: Vec<String> = spec.default_args.iter().map(|s| (*s).to_string()).collect();
 
     if allow_dangerous_permissions && agent_type == "claude-code" {
         args.push("--dangerously-skip-permissions".to_string());
@@ -99,7 +95,10 @@ pub fn resolve_agent_config(
 }
 
 /// All built-in types for workflow validation.
-pub fn all_builtin_types(agents: &AgentsConfig, allow_dangerous_permissions: bool) -> std::collections::HashMap<String, AgentSettingsConfig> {
+pub fn all_builtin_types(
+    agents: &AgentsConfig,
+    allow_dangerous_permissions: bool,
+) -> std::collections::HashMap<String, AgentSettingsConfig> {
     BUILTIN_AGENTS
         .iter()
         .filter(|s| s.agent_type != "shell" && s.agent_type != "unknown")
@@ -120,7 +119,10 @@ mod tests {
     fn dangerous_permissions_opt_in_only() {
         let agents = AgentsConfig::default();
         let safe = resolve_agent_config("claude-code", &agents, false);
-        assert!(!safe.args.iter().any(|a| a.contains("dangerously-skip-permissions")));
+        assert!(!safe
+            .args
+            .iter()
+            .any(|a| a.contains("dangerously-skip-permissions")));
 
         let unsafe_cfg = resolve_agent_config("claude-code", &agents, true);
         assert!(unsafe_cfg

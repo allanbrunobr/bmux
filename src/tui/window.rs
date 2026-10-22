@@ -1,5 +1,5 @@
-use anyhow::Result;
 use crate::security::agent_spawn::AgentPtySpawn;
+use anyhow::Result;
 use ratatui::{buffer::Buffer, layout::Rect};
 
 use ratatui::widgets::Widget;
@@ -100,8 +100,8 @@ impl Window {
         self.next_pane_id += 1;
         let pane = Pane::new(new_id, rows, cols / 2)?;
         self.panes.push(pane);
-        self.layout = std::mem::replace(&mut self.layout, Layout::new(0))
-            .split_h(self.focused_pane, new_id);
+        self.layout =
+            std::mem::replace(&mut self.layout, Layout::new(0)).split_h(self.focused_pane, new_id);
         self.focused_pane = new_id;
         Ok(())
     }
@@ -111,16 +111,11 @@ impl Window {
         let (rows, cols) = self.focused_inner_size();
         let new_id = self.next_pane_id;
         self.next_pane_id += 1;
-        let pane = Pane::spawn_with_command(
-            new_id,
-            rows,
-            cols / 2,
-            spawn.command,
-            spawn.inject_fds,
-        )?;
+        let pane =
+            Pane::spawn_with_command(new_id, rows, cols / 2, spawn.command, spawn.inject_fds)?;
         self.panes.push(pane);
-        self.layout = std::mem::replace(&mut self.layout, Layout::new(0))
-            .split_h(self.focused_pane, new_id);
+        self.layout =
+            std::mem::replace(&mut self.layout, Layout::new(0)).split_h(self.focused_pane, new_id);
         self.focused_pane = new_id;
         Ok(new_id)
     }
@@ -132,8 +127,8 @@ impl Window {
         self.next_pane_id += 1;
         let pane = Pane::new(new_id, rows / 2, cols)?;
         self.panes.push(pane);
-        self.layout = std::mem::replace(&mut self.layout, Layout::new(0))
-            .split_v(self.focused_pane, new_id);
+        self.layout =
+            std::mem::replace(&mut self.layout, Layout::new(0)).split_v(self.focused_pane, new_id);
         self.focused_pane = new_id;
         Ok(())
     }
@@ -169,8 +164,10 @@ impl Window {
     pub fn pane_at(&self, col: u16, row: u16) -> Option<usize> {
         let rects = self.layout.compute_rects(self.last_area);
         for (id, rect) in &rects {
-            if col >= rect.x && col < rect.x + rect.width
-                && row >= rect.y && row < rect.y + rect.height
+            if col >= rect.x
+                && col < rect.x + rect.width
+                && row >= rect.y
+                && row < rect.y + rect.height
             {
                 return Some(*id);
             }
@@ -186,14 +183,14 @@ impl Window {
         for (id_left, rect_l) in &rects {
             let border_x = rect_l.x + rect_l.width;
             // Click within 1 column of the border
-            if col >= border_x.saturating_sub(1) && col <= border_x
-                && row >= rect_l.y && row < rect_l.y + rect_l.height
+            if col >= border_x.saturating_sub(1)
+                && col <= border_x
+                && row >= rect_l.y
+                && row < rect_l.y + rect_l.height
             {
                 // Find the pane on the right side of this border
                 for (id_right, rect_r) in &rects {
-                    if rect_r.x == border_x
-                        && row >= rect_r.y && row < rect_r.y + rect_r.height
-                    {
+                    if rect_r.x == border_x && row >= rect_r.y && row < rect_r.y + rect_r.height {
                         return Some((*id_left, *id_right, border_x));
                     }
                 }
@@ -251,7 +248,9 @@ impl Window {
     /// `mouse_x` is the current mouse column position.
     pub fn drag_border(&mut self, left_pane_id: usize, mouse_x: u16) {
         let area = self.last_area;
-        if area.width == 0 { return; }
+        if area.width == 0 {
+            return;
+        }
         self.layout.set_hsplit_ratio_at(left_pane_id, mouse_x, area);
     }
 
@@ -319,9 +318,7 @@ impl Window {
             if let (Some(hcol), Some(_hrow)) = (self.hover_col, self.hover_row) {
                 if let Some((_left_id, _right_id, border_x)) = self.border_at(hcol, _hrow) {
                     // Highlight the entire vertical border column
-                    let border_style = Style::default()
-                        .fg(Color::Black)
-                        .bg(Color::Cyan);
+                    let border_style = Style::default().fg(Color::Black).bg(Color::Cyan);
                     for y in area.y..area.y + area.height {
                         if border_x > 0 && border_x < area.x + area.width {
                             let cell = &mut buf[(border_x - 1, y)];

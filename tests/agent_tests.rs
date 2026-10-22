@@ -1,12 +1,12 @@
 // Integration tests for the agent system (Stories 2.1 - 2.6)
 
 use bmux::agents::adapter::{AgentAdapter, AgentConfig, AgentStatus, Task};
-use bmux::agents::shell::ShellAdapter;
-use bmux::agents::registry::{AgentRegistry, AgentInfo};
 use bmux::agents::claude_code::ClaudeCodeAdapter;
+use bmux::agents::custom::CustomAdapter;
 use bmux::agents::opencode::OpenCodeAdapter;
 use bmux::agents::pi::PiAdapter;
-use bmux::agents::custom::CustomAdapter;
+use bmux::agents::registry::{AgentInfo, AgentRegistry};
+use bmux::agents::shell::ShellAdapter;
 
 // ─── Story 2.1: AgentAdapter Trait & Shell Agent ───────────────────────────
 
@@ -36,7 +36,10 @@ async fn test_shell_adapter_spawn_and_kill() {
         cost_per_1k_tokens: 0.0,
         args: vec![],
     };
-    agent.spawn(&config).await.expect("Shell agent should spawn");
+    agent
+        .spawn(&config)
+        .await
+        .expect("Shell agent should spawn");
     assert_eq!(agent.status().await, AgentStatus::Idle);
     agent.kill().await.expect("Shell agent should be killable");
 }
@@ -207,8 +210,18 @@ fn test_agent_info_status_indicator() {
 #[test]
 fn test_registry_aggregate_stats() {
     let mut registry = AgentRegistry::new();
-    let config1 = AgentConfig { binary: "claude".to_string(), model: "claude-sonnet-4-5".to_string(), cost_per_1k_tokens: 0.003, args: vec![] };
-    let config2 = AgentConfig { binary: "opencode".to_string(), model: "gemini-2.5-pro".to_string(), cost_per_1k_tokens: 0.001, args: vec![] };
+    let config1 = AgentConfig {
+        binary: "claude".to_string(),
+        model: "claude-sonnet-4-5".to_string(),
+        cost_per_1k_tokens: 0.003,
+        args: vec![],
+    };
+    let config2 = AgentConfig {
+        binary: "opencode".to_string(),
+        model: "gemini-2.5-pro".to_string(),
+        cost_per_1k_tokens: 0.001,
+        args: vec![],
+    };
     registry.register("arch", "claude-code", config1);
     registry.register("tests", "opencode", config2);
 
@@ -236,7 +249,13 @@ fn test_kill_nonexistent_agent_error_message() {
 #[test]
 fn test_custom_adapter_type_and_icon() {
     use bmux::agents::registry::AgentInfo;
-    let agent = CustomAdapter::new("meu-agente", "meu-agente-cli", "llama-3.1-70b", 0.0001, vec!["--mode".to_string(), "interactive".to_string()]);
+    let agent = CustomAdapter::new(
+        "meu-agente",
+        "meu-agente-cli",
+        "llama-3.1-70b",
+        0.0001,
+        vec!["--mode".to_string(), "interactive".to_string()],
+    );
     assert_eq!(agent.agent_type(), "custom");
     assert_eq!(agent.model_name(), "llama-3.1-70b");
     assert_eq!(agent.id(), "meu-agente");

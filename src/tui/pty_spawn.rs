@@ -16,9 +16,7 @@ use std::sync::Mutex;
 
 use anyhow::{Context, Result};
 use libc::{self, winsize};
-use portable_pty::{
-    Child, ChildKiller, CommandBuilder, ExitStatus, MasterPty, PtySize,
-};
+use portable_pty::{Child, ChildKiller, CommandBuilder, ExitStatus, MasterPty, PtySize};
 
 /// Result of spawning a command on a new PTY with optional preserved fds.
 pub struct PtySpawnResult {
@@ -349,4 +347,3 @@ pub fn spawn_with_preserved_fds(
         parent_fds_to_close: Vec::new(),
     })
 }
-

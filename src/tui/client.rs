@@ -5,16 +5,16 @@ use anyhow::{Context, Result};
 use crossterm::{
     event::Event,
     execute,
-    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
+    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use ratatui::{
-    Frame, Terminal,
     backend::CrosstermBackend,
     buffer::Buffer,
     layout::{Constraint, Direction, Layout as RLayout, Rect},
     style::{Color, Modifier, Style},
     text::Span,
     widgets::{Block, Borders, Paragraph, Widget},
+    Frame, Terminal,
 };
 use std::{path::PathBuf, time::Duration};
 use tokio::{
@@ -25,11 +25,8 @@ use tokio::{
 
 use super::{
     ipc_client::{auth_for_socket, encode_signed_client, parse_signed_server},
-    keybindings::{Action, KeybindingState, key_event_to_bytes},
-    protocol::{
-        ClientMessage, PaneSnapshot, ServerMessage, SessionSnapshot,
-        WindowSnapshot,
-    },
+    keybindings::{key_event_to_bytes, Action, KeybindingState},
+    protocol::{ClientMessage, PaneSnapshot, ServerMessage, SessionSnapshot, WindowSnapshot},
 };
 
 pub async fn run_client(socket: PathBuf) -> Result<()> {
@@ -46,15 +43,17 @@ pub async fn run_client(socket: PathBuf) -> Result<()> {
     // Setup TUI
     enable_raw_mode()?;
     let mut stdout = std::io::stdout();
-    execute!(stdout, EnterAlternateScreen, crossterm::event::EnableMouseCapture)?;
+    execute!(
+        stdout,
+        EnterAlternateScreen,
+        crossterm::event::EnableMouseCapture
+    )?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
     // Send Init (signed)
     write_half
-        .write_all(
-            encode_signed_client(&auth, ClientMessage::Init { rows, cols })?.as_bytes(),
-        )
+        .write_all(encode_signed_client(&auth, ClientMessage::Init { rows, cols })?.as_bytes())
         .await?;
 
     // Channel: server-reader thread → main loop
@@ -139,11 +138,8 @@ pub async fn run_client(socket: PathBuf) -> Result<()> {
                         }
                         write_half
                             .write_all(
-                                encode_signed_client(
-                                    &auth,
-                                    ClientMessage::Action { action: act },
-                                )?
-                                .as_bytes(),
+                                encode_signed_client(&auth, ClientMessage::Action { action: act })?
+                                    .as_bytes(),
                             )
                             .await?;
                     } else if pass_to_pty {
@@ -162,7 +158,7 @@ pub async fn run_client(socket: PathBuf) -> Result<()> {
                     }
                 }
                 Event::Mouse(mouse) => {
-                    use crossterm::event::{MouseEventKind, MouseButton};
+                    use crossterm::event::{MouseButton, MouseEventKind};
                     match mouse.kind {
                         MouseEventKind::Down(MouseButton::Left) => {
                             write_half
@@ -209,8 +205,7 @@ pub async fn run_client(socket: PathBuf) -> Result<()> {
                         MouseEventKind::Up(MouseButton::Left) => {
                             write_half
                                 .write_all(
-                                    encode_signed_client(&auth, ClientMessage::MouseUp)?
-                                        .as_bytes(),
+                                    encode_signed_client(&auth, ClientMessage::MouseUp)?.as_bytes(),
                                 )
                                 .await?;
                         }
@@ -234,7 +229,11 @@ pub async fn run_client(socket: PathBuf) -> Result<()> {
 
     // Cleanup
     disable_raw_mode()?;
-    execute!(terminal.backend_mut(), LeaveAlternateScreen, crossterm::event::DisableMouseCapture)?;
+    execute!(
+        terminal.backend_mut(),
+        LeaveAlternateScreen,
+        crossterm::event::DisableMouseCapture
+    )?;
     Ok(())
 }
 
@@ -264,7 +263,12 @@ fn render_snapshot(frame: &mut Frame, snap: &SessionSnapshot) {
 
 fn render_window(buf: &mut Buffer, _area: Rect, win: &WindowSnapshot) {
     for layout_entry in &win.pane_layouts {
-        let rect = Rect::new(layout_entry.x, layout_entry.y, layout_entry.width, layout_entry.height);
+        let rect = Rect::new(
+            layout_entry.x,
+            layout_entry.y,
+            layout_entry.width,
+            layout_entry.height,
+        );
         let focused = layout_entry.id == win.focused_pane;
         let border_style = if focused {
             Style::default().fg(Color::Yellow)
@@ -295,9 +299,8 @@ fn render_pane_cells(buf: &mut Buffer, inner: Rect, snap: &PaneSnapshot, focused
             if x >= inner.x + inner.width {
                 break;
             }
-            let is_cursor = focused
-                && row_idx as u16 == snap.cursor_row
-                && col_idx as u16 == snap.cursor_col;
+            let is_cursor =
+                focused && row_idx as u16 == snap.cursor_row && col_idx as u16 == snap.cursor_col;
             let style = if is_cursor {
                 Style::default()
                     .fg(Color::Black)
@@ -327,8 +330,8 @@ fn render_pane_cells(buf: &mut Buffer, inner: Rect, snap: &PaneSnapshot, focused
 }
 
 fn build_status_bar(snap: &SessionSnapshot) -> ratatui::text::Line<'static> {
-    use ratatui::text::Line;
     use crate::tui::scroll::SCROLL_MODE_INDICATOR;
+    use ratatui::text::Line;
     let mut spans: Vec<Span> = Vec::new();
     spans.push(Span::styled(
         format!(" [{}] ", snap.name),

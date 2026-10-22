@@ -19,7 +19,9 @@ fn integration_secret_fd_survives_pty_spawn() {
     std::fs::set_permissions(&secrets_path, std::fs::Permissions::from_mode(0o600)).unwrap();
 
     let mgr = SecretsManager::load(&secrets_path).unwrap();
-    let fd = mgr.create_secret_fd("anthropics").expect("create_secret_fd");
+    let fd = mgr
+        .create_secret_fd("anthropics")
+        .expect("create_secret_fd");
 
     let mut cmd = CommandBuilder::new("/bin/sh");
     cmd.arg("-c");

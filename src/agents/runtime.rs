@@ -29,11 +29,7 @@ impl<'a> AgentRuntime<'a> {
     }
 
     /// Resolve full agent config for a type, with optional model override.
-    pub fn resolve_config(
-        &self,
-        agent_type: &str,
-        model_override: Option<&str>,
-    ) -> AgentConfig {
+    pub fn resolve_config(&self, agent_type: &str, model_override: Option<&str>) -> AgentConfig {
         let settings = agent_catalog::resolve_agent_config(
             agent_type,
             &self.config.agents,

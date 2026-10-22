@@ -154,9 +154,11 @@ impl WorkflowEngine {
     /// Create a new engine with a default stub TaskRouter (for standalone use).
     pub fn new(context_store: ContextStore) -> Self {
         let bus = Arc::new(
-            crate::orchestration::message_bus::MessageBus::new(
-                format!("wf-engine-{}", uuid::Uuid::new_v4())
-            ).expect("engine bus")
+            crate::orchestration::message_bus::MessageBus::new(format!(
+                "wf-engine-{}",
+                uuid::Uuid::new_v4()
+            ))
+            .expect("engine bus"),
         );
         Self {
             context_store: Arc::new(context_store),
@@ -208,9 +210,7 @@ impl WorkflowEngine {
         self.save_run(run_id, &run.lock().unwrap())?;
 
         // Execute using parallel-aware topological scheduling
-        let result = self
-            .execute_dag(dag, run_id, &run, &input)
-            .await;
+        let result = self.execute_dag(dag, run_id, &run, &input).await;
 
         // Finalize run record
         {
@@ -259,8 +259,7 @@ impl WorkflowEngine {
                 .steps
                 .iter()
                 .filter(|s| {
-                    !completed.contains(&s.id)
-                        && s.depends_on.iter().all(|d| completed.contains(d))
+                    !completed.contains(&s.id) && s.depends_on.iter().all(|d| completed.contains(d))
                 })
                 .map(|s| s.id.clone())
                 .collect();
@@ -324,13 +323,12 @@ impl WorkflowEngine {
                         .timeout_seconds
                         .map(Duration::from_secs)
                         .or(Some(Duration::from_secs(3600)));
-                    let finished = router
-                        .wait_for_task(&task_id, timeout)
-                        .await
-                        .map_err(|e| EngineError::StepFailed {
+                    let finished = router.wait_for_task(&task_id, timeout).await.map_err(|e| {
+                        EngineError::StepFailed {
                             step: step.id.clone(),
                             error: e.to_string(),
-                        })?;
+                        }
+                    })?;
 
                     let duration_ms = start.elapsed().as_millis() as u64;
 
@@ -355,10 +353,8 @@ impl WorkflowEngine {
                             Ok(step.id.clone())
                         }
                         TaskStatus::Failed | TaskStatus::TimedOut | TaskStatus::Cancelled => {
-                            let err = format!(
-                                "task {task_id} ended with status {}",
-                                finished.status
-                            );
+                            let err =
+                                format!("task {task_id} ended with status {}", finished.status);
                             let mut r = run_clone.lock().unwrap();
                             if let Some(rec) = r.steps.iter_mut().find(|s| s.step_id == step.id) {
                                 rec.status = StepStatus::Failed(err.clone());
@@ -517,8 +513,8 @@ fn simple_template_regex() -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::TempDir;
     use serial_test::serial;
+    use tempfile::TempDir;
 
     /// Auto-complete active tasks (simulates agent IPC results in integration tests).
     async fn spawn_task_auto_completer(router: Arc<TaskRouter>) {
@@ -550,22 +546,24 @@ mod tests {
         use crate::orchestration::task_router::AgentInfo;
 
         let dir = TempDir::new().unwrap();
-        let store = ContextStore::open(
-            &format!("engine-test-{}", uuid::Uuid::new_v4()),
-            dir.path(),
-        ).unwrap();
+        let store =
+            ContextStore::open(&format!("engine-test-{}", uuid::Uuid::new_v4()), dir.path())
+                .unwrap();
         let engine = WorkflowEngine::new(store);
 
         // Register stub agents so task dispatch succeeds
         for name in &["a", "b", "c", "d", "arch"] {
-            engine.task_router.register_agent(AgentInfo {
-                id: name.to_string(),
-                agent_type: "claude-code".to_string(),
-                model_name: "test-model".to_string(),
-                cost_per_1k_tokens: 0.001,
-                capabilities: vec![],
-                idle_since: Some(Instant::now()),
-            }).await;
+            engine
+                .task_router
+                .register_agent(AgentInfo {
+                    id: name.to_string(),
+                    agent_type: "claude-code".to_string(),
+                    model_name: "test-model".to_string(),
+                    cost_per_1k_tokens: 0.001,
+                    capabilities: vec![],
+                    idle_since: Some(Instant::now()),
+                })
+                .await;
         }
 
         (engine, dir)
@@ -579,26 +577,28 @@ mod tests {
 
     // ── Story 5.2: parameter injection ───────────────────────────────────────
 
-    
     #[serial]
     #[test]
     fn test_resolve_template_input_substitution() {
         let dir = TempDir::new().unwrap();
         let ctx = ContextStore::open("tmpl", dir.path()).unwrap();
         let mut input = HashMap::new();
-        input.insert("feature".to_string(), serde_json::Value::String("login".to_string()));
+        input.insert(
+            "feature".to_string(),
+            serde_json::Value::String("login".to_string()),
+        );
 
         let result = resolve_template("Design: {{ input.feature }}", &input, &ctx, "run1");
         assert_eq!(result, "Design: login");
     }
 
-    
     #[serial]
     #[test]
     fn test_resolve_template_context_substitution() {
         let dir = TempDir::new().unwrap();
         let ctx = ContextStore::open("tmpl2", dir.path()).unwrap();
-        ctx.set("workflow:run1:design:output", "design output", None).unwrap();
+        ctx.set("workflow:run1:design:output", "design output", None)
+            .unwrap();
 
         let result = resolve_template(
             "Implement: {{ context.workflow:run1:design:output }}",
@@ -609,7 +609,6 @@ mod tests {
         assert_eq!(result, "Implement: design output");
     }
 
-    
     #[serial]
     #[test]
     fn test_resolve_template_missing_key_resolves_empty() {
@@ -784,7 +783,10 @@ steps:
     prompt: "D"
 "#;
         let dag = make_dag_from_yaml(yaml);
-        let run = engine.run(&dag, "run-diamond", HashMap::new()).await.unwrap();
+        let run = engine
+            .run(&dag, "run-diamond", HashMap::new())
+            .await
+            .unwrap();
         assert_eq!(run.status, WorkflowRunStatus::Completed);
         assert!(run.steps.iter().all(|s| s.status == StepStatus::Completed));
     }
@@ -807,7 +809,10 @@ steps:
     prompt: "Do it"
 "#;
         let dag = make_dag_from_yaml(yaml);
-        engine.run(&dag, "run-status", HashMap::new()).await.unwrap();
+        engine
+            .run(&dag, "run-status", HashMap::new())
+            .await
+            .unwrap();
 
         let status = engine.get_status("run-status").unwrap().unwrap();
         assert_eq!(status.workflow_name, "status-test");
@@ -831,7 +836,10 @@ steps:
     prompt: "Design it"
 "#;
         let dag = make_dag_from_yaml(yaml);
-        engine.run(&dag, "run-detail", HashMap::new()).await.unwrap();
+        engine
+            .run(&dag, "run-detail", HashMap::new())
+            .await
+            .unwrap();
 
         let status = engine.get_status("run-detail").unwrap().unwrap();
         let step = status.steps.iter().find(|s| s.step_id == "design").unwrap();
@@ -840,7 +848,6 @@ steps:
         assert!(step.duration_ms.is_some());
     }
 
-    
     #[serial]
     #[tokio::test]
     async fn test_get_status_returns_none_for_unknown_id() {
@@ -849,7 +856,6 @@ steps:
         assert!(status.is_none());
     }
 
-    
     #[serial]
     #[test]
     fn test_workflow_run_display_format() {
@@ -858,16 +864,14 @@ steps:
             workflow_name: "my-workflow".to_string(),
             started_at: 1000,
             finished_at: Some(1060),
-            steps: vec![
-                StepRecord {
-                    step_id: "step1".to_string(),
-                    status: StepStatus::Completed,
-                    assigned_agent: Some("arch".to_string()),
-                    duration_ms: Some(500),
-                    cost_usd: Some(0.001),
-                    output_key: "workflow:test-run:step1:output".to_string(),
-                },
-            ],
+            steps: vec![StepRecord {
+                step_id: "step1".to_string(),
+                status: StepStatus::Completed,
+                assigned_agent: Some("arch".to_string()),
+                duration_ms: Some(500),
+                cost_usd: Some(0.001),
+                output_key: "workflow:test-run:step1:output".to_string(),
+            }],
             total_cost_usd: 0.001,
             status: WorkflowRunStatus::Completed,
         };

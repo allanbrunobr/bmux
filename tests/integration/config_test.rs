@@ -39,9 +39,7 @@ binary = "pi-agent"
 
 #[test]
 fn integration_config_defaults_when_file_absent() {
-    let cfg = BmuxConfig::load_or_default(std::path::Path::new(
-        "/absolutely/does/not/exist.toml",
-    ));
+    let cfg = BmuxConfig::load_or_default(std::path::Path::new("/absolutely/does/not/exist.toml"));
     assert_eq!(cfg.prefix, "ctrl-b");
     assert_eq!(cfg.history_limit, 10_000);
     assert!(!cfg.mouse_support);
@@ -67,9 +65,10 @@ fn integration_hot_reload_invalid_keeps_error_message() {
 #[test]
 fn integration_config_example_file_is_valid_toml() {
     // Validate that the example config file ships valid TOML
-    let example_path = std::path::Path::new(
-        concat!(env!("CARGO_MANIFEST_DIR"), "/.config/bmux/config.toml.example"),
-    );
+    let example_path = std::path::Path::new(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/.config/bmux/config.toml.example"
+    ));
     assert!(example_path.exists(), "config.toml.example must exist");
 
     // Strip comment lines that have inline values — the example uses commented-out

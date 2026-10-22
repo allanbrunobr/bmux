@@ -155,9 +155,7 @@ impl AuditLogger {
         path: &str,
         session_id: &str,
     ) -> Result<String, AuditError> {
-        let message = format!(
-            "Access denied: agent '{agent_name}' attempted to read '{path}'"
-        );
+        let message = format!("Access denied: agent '{agent_name}' attempted to read '{path}'");
         self.log_event(AuditEntry::new(
             EventType::SandboxAccessDenied,
             Some(agent_name),
@@ -268,8 +266,8 @@ pub fn purge_all_data() {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::TempDir;
     use serial_test::serial;
+    use tempfile::TempDir;
 
     fn make_logger(dir: &Path, enabled: bool) -> AuditLogger {
         AuditLogger::new(dir.to_path_buf(), enabled)
@@ -284,7 +282,6 @@ mod tests {
         )
     }
 
-    
     #[serial]
     #[test]
     fn test_write_event_creates_jsonl_file() {
@@ -303,7 +300,6 @@ mod tests {
         );
     }
 
-    
     #[serial]
     #[test]
     fn test_event_is_valid_json() {
@@ -323,14 +319,22 @@ mod tests {
             assert!(!line.is_empty());
             let parsed: serde_json::Value =
                 serde_json::from_str(line).expect("each line must be valid JSON");
-            assert!(parsed.get("timestamp").is_some(), "must have timestamp field");
-            assert!(parsed.get("event_type").is_some(), "must have event_type field");
-            assert!(parsed.get("session_id").is_some(), "must have session_id field");
+            assert!(
+                parsed.get("timestamp").is_some(),
+                "must have timestamp field"
+            );
+            assert!(
+                parsed.get("event_type").is_some(),
+                "must have event_type field"
+            );
+            assert!(
+                parsed.get("session_id").is_some(),
+                "must have session_id field"
+            );
             assert!(parsed.get("metadata").is_some(), "must have metadata field");
         }
     }
 
-    
     #[serial]
     #[test]
     fn test_entry_contains_required_fields() {
@@ -344,7 +348,6 @@ mod tests {
         assert_eq!(parsed["session_id"].as_str().unwrap(), "session-abc");
     }
 
-    
     #[serial]
     #[test]
     fn test_50_sequential_task_sent_entries_all_recorded() {
@@ -366,7 +369,6 @@ mod tests {
         assert_eq!(count, 50, "NFR-08: exactly 50 task_sent entries must exist");
     }
 
-    
     #[serial]
     #[test]
     fn test_disabled_log_writes_nothing() {
@@ -386,7 +388,6 @@ mod tests {
         );
     }
 
-    
     #[serial]
     #[test]
     fn test_disabled_notice_shown_only_once() {
@@ -401,7 +402,6 @@ mod tests {
         assert!(logger.disabled_notice_shown); // still true, not toggled back
     }
 
-    
     #[serial]
     #[test]
     fn test_purge_audit_logs_removes_files() {
@@ -426,7 +426,6 @@ mod tests {
         assert_eq!(after.len(), 0, "all files should be gone after purge");
     }
 
-    
     #[serial]
     #[test]
     fn test_purge_nonexistent_dir_is_noop() {
@@ -434,7 +433,6 @@ mod tests {
         assert!(result.is_ok(), "purge of nonexistent dir must not error");
     }
 
-    
     #[serial]
     #[test]
     fn test_sandbox_denied_event_logged_with_correct_message() {
@@ -450,11 +448,12 @@ mod tests {
             "Access denied: agent 'my-agent' attempted to read '/home/user/.ssh/id_rsa'"
         );
 
-        let count = logger.count_events(&EventType::SandboxAccessDenied).unwrap();
+        let count = logger
+            .count_events(&EventType::SandboxAccessDenied)
+            .unwrap();
         assert_eq!(count, 1);
     }
 
-    
     #[serial]
     #[test]
     fn test_all_event_types_serialize_correctly() {
@@ -475,7 +474,6 @@ mod tests {
         }
     }
 
-    
     #[serial]
     #[test]
     fn test_log_multiple_event_types_counted_separately() {

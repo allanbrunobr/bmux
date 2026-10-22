@@ -75,8 +75,8 @@ impl BmuxConfig {
     pub fn load_from_path(path: &Path) -> anyhow::Result<Self> {
         let content = std::fs::read_to_string(path)
             .map_err(|e| anyhow::anyhow!("Cannot read {}: {}", path.display(), e))?;
-        let config: BmuxConfig = toml::from_str(&content)
-            .map_err(|e| anyhow::anyhow!("TOML parse error: {e}"))?;
+        let config: BmuxConfig =
+            toml::from_str(&content).map_err(|e| anyhow::anyhow!("TOML parse error: {e}"))?;
         Ok(config)
     }
 
@@ -173,7 +173,11 @@ impl Default for AgentsConfig {
 
 impl AgentsConfig {
     /// Look up built-in agent settings by type name.
-    pub fn get(&self, name: &str, allow_dangerous_permissions: bool) -> Option<AgentSettingsConfig> {
+    pub fn get(
+        &self,
+        name: &str,
+        allow_dangerous_permissions: bool,
+    ) -> Option<AgentSettingsConfig> {
         if crate::config::agent_catalog::builtin_spec(name).is_some() {
             Some(crate::config::agent_catalog::resolve_agent_config(
                 name,

@@ -7,8 +7,8 @@ use tempfile::TempDir;
 #[test]
 fn integration_sandbox_none_mode_succeeds() {
     let dir = TempDir::new().unwrap();
-    let mode = apply_sandbox(dir.path(), Some("none"), "test-agent")
-        .expect("none mode must succeed");
+    let mode =
+        apply_sandbox(dir.path(), Some("none"), "test-agent").expect("none mode must succeed");
     assert_eq!(mode, SandboxMode::None);
 }
 
@@ -93,8 +93,14 @@ fn integration_seatbelt_profile_is_valid_sbpl() {
     let profile = build_seatbelt_profile(dir.path());
 
     // Must be well-formed SBPL
-    assert!(profile.contains("(version 1)"), "SBPL must start with version");
-    assert!(profile.contains("(deny default)"), "SBPL must deny by default");
+    assert!(
+        profile.contains("(version 1)"),
+        "SBPL must start with version"
+    );
+    assert!(
+        profile.contains("(deny default)"),
+        "SBPL must deny by default"
+    );
     assert!(
         profile.contains(&dir.path().display().to_string()),
         "SBPL must allow project dir"

@@ -10,7 +10,7 @@ name: CI
 
 on:
   push:
-    branches: ["main", "bmux-bmad-*"]
+    branches: ["main"]
   pull_request:
     branches: ["main"]
 

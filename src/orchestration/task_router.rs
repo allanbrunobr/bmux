@@ -8,8 +8,7 @@ use tokio::sync::{broadcast, RwLock};
 use tracing::{info, warn};
 
 use crate::orchestration::message_bus::{
-    AgentState, MessageBus, MessageBuilder, MessageType, ResultPayload,
-    TaskPayload,
+    AgentState, MessageBuilder, MessageBus, MessageType, ResultPayload, TaskPayload,
 };
 
 // Canonical agent types from agents module
@@ -184,9 +183,7 @@ impl TaskRouter {
                     position: pos,
                 })
             }
-            AgentState::Error(e) => {
-                Err(anyhow!("Agent '{agent_id}' is in error state: {e}"))
-            }
+            AgentState::Error(e) => Err(anyhow!("Agent '{agent_id}' is in error state: {e}")),
         }
     }
 
@@ -241,11 +238,7 @@ impl TaskRouter {
     ///
     /// Returns the final task record. On timeout, marks Active/Queued tasks as
     /// `TimedOut` and returns the updated record.
-    pub async fn wait_for_task(
-        &self,
-        task_id: &str,
-        timeout: Option<Duration>,
-    ) -> Result<Task> {
+    pub async fn wait_for_task(&self, task_id: &str, timeout: Option<Duration>) -> Result<Task> {
         let deadline = timeout.map(|t| Instant::now() + t);
 
         loop {
@@ -265,10 +258,7 @@ impl TaskRouter {
                 if Instant::now() >= deadline {
                     let mut tasks = self.tasks.write().await;
                     if let Some(task) = tasks.get_mut(task_id) {
-                        if matches!(
-                            task.status,
-                            TaskStatus::Queued | TaskStatus::Active
-                        ) {
+                        if matches!(task.status, TaskStatus::Queued | TaskStatus::Active) {
                             task.status = TaskStatus::TimedOut;
                             warn!(task_id = %task_id, "Task timed out while waiting for completion");
                         }
@@ -310,9 +300,7 @@ impl TaskRouter {
                 agent_status
                     .get(&a.id)
                     .map_or(true, |s| *s == AgentState::Idle)
-                    && max_cost_usd.map_or(true, |max| {
-                        a.cost_per_1k_tokens * 0.001 <= max
-                    })
+                    && max_cost_usd.map_or(true, |max| a.cost_per_1k_tokens * 0.001 <= max)
             })
             .collect();
 
@@ -766,14 +754,27 @@ fn capability_score(agent: &AgentInfo, task_content: &str) -> f64 {
 
 #[derive(Debug)]
 pub enum SendResult {
-    Dispatched { task_id: String },
-    Queued { task_id: String, agent_id: String, position: usize },
+    Dispatched {
+        task_id: String,
+    },
+    Queued {
+        task_id: String,
+        agent_id: String,
+        position: usize,
+    },
 }
 
 #[derive(Debug)]
 pub enum AutoRouteResult {
-    Dispatched { task_id: String, agent_id: String, estimated_cost: f64 },
-    AllBusy { task_id: String, timeout_seconds: u64 },
+    Dispatched {
+        task_id: String,
+        agent_id: String,
+        estimated_cost: f64,
+    },
+    AllBusy {
+        task_id: String,
+        timeout_seconds: u64,
+    },
 }
 
 #[derive(Debug, PartialEq)]
@@ -790,7 +791,6 @@ fn short_id(full_id: &str) -> String {
     full_id.replace('-', "")[..8].to_string()
 }
 
-
 // ---------------------------------------------------------------------------
 // Tests — Stories 3.2, 3.3, 3.4, 3.5
 // ---------------------------------------------------------------------------
@@ -803,9 +803,7 @@ mod tests {
 
     async fn make_router() -> (Arc<MessageBus>, TaskRouter) {
         let session_id = uuid::Uuid::new_v4().to_string();
-        let bus = Arc::new(
-            MessageBus::new(&session_id).expect("bus creation failed"),
-        );
+        let bus = Arc::new(MessageBus::new(&session_id).expect("bus creation failed"));
         bus.start().await.expect("bus start failed");
         sleep(Duration::from_millis(20)).await;
         let router = TaskRouter::new(Arc::clone(&bus), 5);
@@ -830,10 +828,15 @@ mod tests {
     #[tokio::test]
     async fn test_send_task_to_idle_agent_dispatches_immediately() {
         let (bus, router) = make_router().await;
-        router.register_agent(make_agent("arch", "claude-sonnet", 0.003, vec![])).await;
+        router
+            .register_agent(make_agent("arch", "claude-sonnet", 0.003, vec![]))
+            .await;
         // Agent starts as idle (no entry in status map = idle)
 
-        let result = router.send_to_agent("arch", "Refactor auth module", 1).await.unwrap();
+        let result = router
+            .send_to_agent("arch", "Refactor auth module", 1)
+            .await
+            .unwrap();
         sleep(Duration::from_millis(30)).await;
 
         match result {
@@ -855,7 +858,9 @@ mod tests {
     #[tokio::test]
     async fn test_send_task_to_busy_agent_queues_it() {
         let (bus, router) = make_router().await;
-        router.register_agent(make_agent("arch", "claude-sonnet", 0.003, vec![])).await;
+        router
+            .register_agent(make_agent("arch", "claude-sonnet", 0.003, vec![]))
+            .await;
 
         // Mark agent as Working first
         {
@@ -864,10 +869,17 @@ mod tests {
             map.insert("arch".to_string(), AgentState::Working);
         }
 
-        let result = router.send_to_agent("arch", "Do something else", 1).await.unwrap();
+        let result = router
+            .send_to_agent("arch", "Do something else", 1)
+            .await
+            .unwrap();
 
         match result {
-            SendResult::Queued { task_id, agent_id, position } => {
+            SendResult::Queued {
+                task_id,
+                agent_id,
+                position,
+            } => {
                 assert_eq!(agent_id, "arch");
                 assert_eq!(position, 1);
                 let task = router.task_status(&task_id).await.unwrap();
@@ -895,7 +907,9 @@ mod tests {
     #[tokio::test]
     async fn test_list_tasks_returns_all_tasks() {
         let (bus, router) = make_router().await;
-        router.register_agent(make_agent("arch", "claude-sonnet", 0.003, vec![])).await;
+        router
+            .register_agent(make_agent("arch", "claude-sonnet", 0.003, vec![]))
+            .await;
 
         router.send_to_agent("arch", "task one", 1).await.unwrap();
         // Mark busy so second is queued
@@ -914,7 +928,9 @@ mod tests {
     #[tokio::test]
     async fn test_cancel_queued_task_succeeds() {
         let (bus, router) = make_router().await;
-        router.register_agent(make_agent("arch", "claude-sonnet", 0.003, vec![])).await;
+        router
+            .register_agent(make_agent("arch", "claude-sonnet", 0.003, vec![]))
+            .await;
 
         // Force agent to Working so next task is queued
         {
@@ -941,10 +957,15 @@ mod tests {
     #[tokio::test]
     async fn test_cancel_active_task_returns_already_active() {
         let (bus, router) = make_router().await;
-        router.register_agent(make_agent("arch", "claude-sonnet", 0.003, vec![])).await;
+        router
+            .register_agent(make_agent("arch", "claude-sonnet", 0.003, vec![]))
+            .await;
         sleep(Duration::from_millis(20)).await;
 
-        let result = router.send_to_agent("arch", "active task", 1).await.unwrap();
+        let result = router
+            .send_to_agent("arch", "active task", 1)
+            .await
+            .unwrap();
         sleep(Duration::from_millis(30)).await;
 
         let task_id = match result {
@@ -961,7 +982,9 @@ mod tests {
     #[tokio::test]
     async fn test_task_status_shows_queue_position() {
         let (bus, router) = make_router().await;
-        router.register_agent(make_agent("arch", "claude-sonnet", 0.003, vec![])).await;
+        router
+            .register_agent(make_agent("arch", "claude-sonnet", 0.003, vec![]))
+            .await;
 
         {
             let _ast = bus.agent_status();
@@ -1002,7 +1025,12 @@ mod tests {
         // agent-capable: matching capability, medium cost (0.001)
         // score = cap(1.0)*0.5 + cost(0.5)*0.3 + idle(1.0)*0.2 = 0.85  <- wins
         router
-            .register_agent(make_agent("agent-capable", "sonnet", 0.001, vec!["refactor"]))
+            .register_agent(make_agent(
+                "agent-capable",
+                "sonnet",
+                0.001,
+                vec!["refactor"],
+            ))
             .await;
         // agent-mid: higher cost (0.002), no caps
         // score = cap(0.5)*0.5 + cost(0.0)*0.3 + idle(1.0)*0.2 = 0.45
@@ -1031,7 +1059,9 @@ mod tests {
     #[tokio::test]
     async fn test_auto_route_all_busy_queues_task() {
         let (bus, router) = make_router().await;
-        router.register_agent(make_agent("agent-a", "sonnet", 0.003, vec![])).await;
+        router
+            .register_agent(make_agent("agent-a", "sonnet", 0.003, vec![]))
+            .await;
 
         // Mark agent as busy
         {
@@ -1043,7 +1073,10 @@ mod tests {
         let result = router.send_auto("do something", None, None).await.unwrap();
 
         match result {
-            AutoRouteResult::AllBusy { task_id, timeout_seconds } => {
+            AutoRouteResult::AllBusy {
+                task_id,
+                timeout_seconds,
+            } => {
                 assert_eq!(timeout_seconds, 5);
                 let task = router.task_status(&task_id).await.unwrap();
                 assert_eq!(task.status, TaskStatus::Queued);
@@ -1083,7 +1116,9 @@ mod tests {
     async fn test_auto_route_timeout_marks_task_timed_out() {
         let (bus, _) = make_router().await;
         let router = TaskRouter::new(Arc::clone(&bus), 0); // 0-second timeout
-        router.register_agent(make_agent("agent-a", "sonnet", 0.003, vec![])).await;
+        router
+            .register_agent(make_agent("agent-a", "sonnet", 0.003, vec![]))
+            .await;
 
         {
             let _ast = bus.agent_status();
@@ -1113,7 +1148,9 @@ mod tests {
     #[tokio::test]
     async fn test_result_marks_task_completed_with_details() {
         let (bus, router) = make_router().await;
-        router.register_agent(make_agent("arch", "sonnet", 0.003, vec![])).await;
+        router
+            .register_agent(make_agent("arch", "sonnet", 0.003, vec![]))
+            .await;
         sleep(Duration::from_millis(20)).await;
 
         let send_result = router.send_to_agent("arch", "write docs", 1).await.unwrap();
@@ -1137,7 +1174,10 @@ mod tests {
             task_id: Some(full_id.clone()),
         };
 
-        router.handle_result(&full_id, result_payload).await.unwrap();
+        router
+            .handle_result(&full_id, result_payload)
+            .await
+            .unwrap();
 
         let task = router.task_status(&task_id).await.unwrap();
         assert_eq!(task.status, TaskStatus::Completed);
@@ -1182,10 +1222,15 @@ mod tests {
     #[tokio::test]
     async fn test_prune_terminal_tasks_retains_recent() {
         let (bus, router) = make_router().await;
-        router.register_agent(make_agent("arch", "sonnet", 0.003, vec![])).await;
+        router
+            .register_agent(make_agent("arch", "sonnet", 0.003, vec![]))
+            .await;
 
         for i in 0..5 {
-            let send = router.send_to_agent("arch", &format!("task {i}"), 1).await.unwrap();
+            let send = router
+                .send_to_agent("arch", &format!("task {i}"), 1)
+                .await
+                .unwrap();
             let task_id = match send {
                 SendResult::Dispatched { task_id } => task_id,
                 _ => panic!("expected dispatch"),
@@ -1216,7 +1261,9 @@ mod tests {
     #[tokio::test]
     async fn test_wait_for_task_returns_on_completion() {
         let (bus, router) = make_router().await;
-        router.register_agent(make_agent("arch", "sonnet", 0.003, vec![])).await;
+        router
+            .register_agent(make_agent("arch", "sonnet", 0.003, vec![]))
+            .await;
         sleep(Duration::from_millis(20)).await;
 
         let send_result = router.send_to_agent("arch", "wait me", 1).await.unwrap();
@@ -1263,7 +1310,9 @@ mod tests {
     #[tokio::test]
     async fn test_agent_crash_marks_task_failed_and_agent_error() {
         let (bus, router) = make_router().await;
-        router.register_agent(make_agent("arch", "sonnet", 0.003, vec![])).await;
+        router
+            .register_agent(make_agent("arch", "sonnet", 0.003, vec![]))
+            .await;
         sleep(Duration::from_millis(20)).await;
 
         // Dispatch a task
@@ -1280,7 +1329,10 @@ mod tests {
 
         // Task should be Failed
         let tasks = router.list_tasks().await;
-        let failed: Vec<_> = tasks.iter().filter(|t| t.status == TaskStatus::Failed).collect();
+        let failed: Vec<_> = tasks
+            .iter()
+            .filter(|t| t.status == TaskStatus::Failed)
+            .collect();
         assert!(!failed.is_empty(), "at least one task should be failed");
 
         bus.stop();
@@ -1289,7 +1341,9 @@ mod tests {
     #[tokio::test]
     async fn test_result_returns_agent_to_idle_and_dispatches_queue() {
         let (bus, router) = make_router().await;
-        router.register_agent(make_agent("arch", "sonnet", 0.003, vec![])).await;
+        router
+            .register_agent(make_agent("arch", "sonnet", 0.003, vec![]))
+            .await;
         sleep(Duration::from_millis(20)).await;
 
         // Send first task (dispatched)
@@ -1300,27 +1354,43 @@ mod tests {
         let r2 = router.send_to_agent("arch", "task two", 1).await.unwrap();
         sleep(Duration::from_millis(10)).await;
 
-        let task1_id = match r1 { SendResult::Dispatched { task_id } => task_id, _ => panic!() };
-        let task2_id = match r2 { SendResult::Queued { task_id, .. } => task_id, _ => panic!() };
+        let task1_id = match r1 {
+            SendResult::Dispatched { task_id } => task_id,
+            _ => panic!(),
+        };
+        let task2_id = match r2 {
+            SendResult::Queued { task_id, .. } => task_id,
+            _ => panic!(),
+        };
 
         // Complete task 1
         let full_id = {
             let tasks = router.tasks.read().await;
             tasks.get(&task1_id).unwrap().full_id.clone()
         };
-        router.handle_result(&full_id, ResultPayload {
-            content: "done".into(),
-            tokens_used: 100,
-            cost_usd: 0.0003,
-            duration_ms: 500,
-            task_id: Some(full_id.clone()),
-        }).await.unwrap();
+        router
+            .handle_result(
+                &full_id,
+                ResultPayload {
+                    content: "done".into(),
+                    tokens_used: 100,
+                    cost_usd: 0.0003,
+                    duration_ms: 500,
+                    task_id: Some(full_id.clone()),
+                },
+            )
+            .await
+            .unwrap();
 
         // Give the dispatcher time to pick up task 2
         sleep(Duration::from_millis(60)).await;
 
         let task2 = router.task_status(&task2_id).await.unwrap();
-        assert_eq!(task2.status, TaskStatus::Active, "queued task should be dispatched after first completes");
+        assert_eq!(
+            task2.status,
+            TaskStatus::Active,
+            "queued task should be dispatched after first completes"
+        );
 
         bus.stop();
     }

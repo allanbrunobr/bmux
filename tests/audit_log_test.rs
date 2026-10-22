@@ -1,9 +1,7 @@
 // tests/audit_log_test.rs — Integration tests for Story 6.3
 // Audit Logging
 
-use bmux::storage::audit_log::{
-    purge_audit_logs, AuditEntry, AuditLogger, EventType,
-};
+use bmux::storage::audit_log::{purge_audit_logs, AuditEntry, AuditLogger, EventType};
 use std::fs;
 use tempfile::TempDir;
 
@@ -12,7 +10,12 @@ fn logger(dir: &TempDir, enabled: bool) -> AuditLogger {
 }
 
 fn entry(event: EventType) -> AuditEntry {
-    AuditEntry::new(event, Some("agent-1"), "session-test", serde_json::Value::Null)
+    AuditEntry::new(
+        event,
+        Some("agent-1"),
+        "session-test",
+        serde_json::Value::Null,
+    )
 }
 
 #[test]

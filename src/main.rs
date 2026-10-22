@@ -250,8 +250,12 @@ async fn main() -> Result<()> {
         Some(Commands::Kill { session }) => cmd_kill(&session),
         Some(Commands::Agent { session, action }) => cmd_agent(session.as_deref(), action).await,
         Some(Commands::Task { session, action }) => cmd_task(session.as_deref(), action).await,
-        Some(Commands::Context { session, action }) => cmd_context(session.as_deref(), action).await,
-        Some(Commands::Workflow { session, action }) => cmd_workflow(session.as_deref(), action).await,
+        Some(Commands::Context { session, action }) => {
+            cmd_context(session.as_deref(), action).await
+        }
+        Some(Commands::Workflow { session, action }) => {
+            cmd_workflow(session.as_deref(), action).await
+        }
         Some(Commands::Config { action }) => cmd_config(action),
         Some(Commands::Data { action }) => cmd_data(action),
     }
@@ -266,7 +270,10 @@ async fn cmd_new(name: &str) -> Result<()> {
 
     let existing = list_sessions();
     if existing.iter().any(|s| s.name == name) {
-        eprintln!("Session '{}' is already running. Use `bmux attach -s {}` to attach.", name, name);
+        eprintln!(
+            "Session '{}' is already running. Use `bmux attach -s {}` to attach.",
+            name, name
+        );
         std::process::exit(1);
     }
 
@@ -281,7 +288,9 @@ async fn cmd_new(name: &str) -> Result<()> {
     let sock = socket_path(name);
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
     loop {
-        if sock.exists() { break; }
+        if sock.exists() {
+            break;
+        }
         if std::time::Instant::now() >= deadline {
             anyhow::bail!("Timed out waiting for session '{}' to start", name);
         }
@@ -309,7 +318,12 @@ fn cmd_ls() -> Result<()> {
         println!("{:<20} {:>8}  CREATED", "NAME", "WINDOWS");
         println!("{}", "-".repeat(50));
         for s in &sessions {
-            println!("{:<20} {:>8}  {}", s.name, s.window_count, s.created_at.format("%Y-%m-%d %H:%M:%S UTC"));
+            println!(
+                "{:<20} {:>8}  {}",
+                s.name,
+                s.window_count,
+                s.created_at.format("%Y-%m-%d %H:%M:%S UTC")
+            );
         }
     }
     Ok(())
@@ -318,7 +332,9 @@ fn cmd_ls() -> Result<()> {
 fn cmd_kill(name: &str) -> Result<()> {
     use bmux::tui::session::{list_sessions, meta_path, socket_path};
     let sessions = list_sessions();
-    let meta = sessions.iter().find(|s| s.name == name)
+    let meta = sessions
+        .iter()
+        .find(|s| s.name == name)
         .ok_or_else(|| anyhow::anyhow!("No session named '{}'", name))?;
     send_sigterm(meta.pid);
     let _ = std::fs::remove_file(socket_path(name));
@@ -338,9 +354,15 @@ async fn cmd_agent(session: Option<&str>, action: AgentCommands) -> Result<()> {
     let sock = resolve_session(session)?;
 
     let msg = match action {
-        AgentCommands::Spawn { agent_type, name, model } => {
-            ClientMessage::AgentSpawn { agent_type, name, model }
-        }
+        AgentCommands::Spawn {
+            agent_type,
+            name,
+            model,
+        } => ClientMessage::AgentSpawn {
+            agent_type,
+            name,
+            model,
+        },
         AgentCommands::List => ClientMessage::AgentList,
         AgentCommands::Status { name } => ClientMessage::AgentStatus { name },
         AgentCommands::Kill { name } => ClientMessage::AgentKill { name },
@@ -362,9 +384,18 @@ async fn cmd_task(session: Option<&str>, action: TaskCommands) -> Result<()> {
     let sock = resolve_session(session)?;
 
     let msg = match action {
-        TaskCommands::Send { agent, content, auto, model } => {
+        TaskCommands::Send {
+            agent,
+            content,
+            auto,
+            model,
+        } => {
             let agent = if auto { None } else { agent };
-            ClientMessage::TaskSend { agent, content, model }
+            ClientMessage::TaskSend {
+                agent,
+                content,
+                model,
+            }
         }
         TaskCommands::List => ClientMessage::TaskList,
         TaskCommands::Cancel { id } => ClientMessage::TaskCancel { id },
@@ -411,7 +442,11 @@ async fn cmd_workflow(session: Option<&str>, action: WorkflowCommands) -> Result
     use bmux::workflow::yaml_parser::WorkflowParser;
 
     match action {
-        WorkflowCommands::Run { file, input, dry_run } => {
+        WorkflowCommands::Run {
+            file,
+            input,
+            dry_run,
+        } => {
             let parser = WorkflowParser::new();
             let settings = BmuxConfig::load().unwrap_or_default();
             let dag = parser.parse_file(&file)?;
@@ -490,8 +525,6 @@ fn cmd_config(action: ConfigCommands) -> Result<()> {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 fn cmd_data(action: DataCommands) -> Result<()> {
-    
-
     match action {
         DataCommands::Purge => {
             // Purge audit logs

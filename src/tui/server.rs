@@ -17,13 +17,13 @@ use std::{
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
     net::{UnixListener, UnixStream},
-    sync::{Mutex, broadcast},
+    sync::{broadcast, Mutex},
     time::interval,
 };
 
 use crate::agents::adapter::AgentConfig;
-use crate::agents::registry::AgentRegistry;
 use crate::agents::commands::agent_type_icon;
+use crate::agents::registry::AgentRegistry;
 use crate::agents::runtime::AgentRuntime;
 use crate::config::settings::BmuxConfig;
 use crate::orchestration::message_bus::{MessageBus, MessageType, ResultPayload};
@@ -36,13 +36,9 @@ use crate::workflow::yaml_parser::WorkflowParser;
 use super::{
     keybindings::Action,
     layout::ResizeDir,
-    protocol::{
-        ClientMessage, ServerMessage, SessionSnapshot,
-    },
-    session::{Session, SessionMeta, meta_path, socket_path},
-    session_auth::{
-        self, SessionAuth, SignedClientFrame, SignedServerFrame,
-    },
+    protocol::{ClientMessage, ServerMessage, SessionSnapshot},
+    session::{meta_path, socket_path, Session, SessionMeta},
+    session_auth::{self, SessionAuth, SignedClientFrame, SignedServerFrame},
 };
 
 /// Shared daemon state accessible from all client handlers.
@@ -119,7 +115,11 @@ impl DaemonServer {
 
         let listener = UnixListener::bind(&self.socket_path)?;
         harden_socket_permissions(&self.socket_path)?;
-        tracing::info!("Session '{}' listening on {:?}", self.name, self.socket_path);
+        tracing::info!(
+            "Session '{}' listening on {:?}",
+            self.name,
+            self.socket_path
+        );
 
         self.state.task_router.message_bus().start().await?;
         spawn_result_subscriber(Arc::clone(&self.state.task_router));
@@ -246,19 +246,19 @@ async fn handle_client(
     let is_cli_query = matches!(
         first_msg,
         ClientMessage::AgentList
-        | ClientMessage::AgentStatus { .. }
-        | ClientMessage::AgentSpawn { .. }
-        | ClientMessage::AgentKill { .. }
-        | ClientMessage::TaskList
-        | ClientMessage::TaskSend { .. }
-        | ClientMessage::TaskCancel { .. }
-        | ClientMessage::TaskStatus { .. }
-        | ClientMessage::ContextSet { .. }
-        | ClientMessage::ContextGet { .. }
-        | ClientMessage::ContextList
-        | ClientMessage::ContextDump
-        | ClientMessage::WorkflowRun { .. }
-        | ClientMessage::WorkflowStatus { .. }
+            | ClientMessage::AgentStatus { .. }
+            | ClientMessage::AgentSpawn { .. }
+            | ClientMessage::AgentKill { .. }
+            | ClientMessage::TaskList
+            | ClientMessage::TaskSend { .. }
+            | ClientMessage::TaskCancel { .. }
+            | ClientMessage::TaskStatus { .. }
+            | ClientMessage::ContextSet { .. }
+            | ClientMessage::ContextGet { .. }
+            | ClientMessage::ContextList
+            | ClientMessage::ContextDump
+            | ClientMessage::WorkflowRun { .. }
+            | ClientMessage::WorkflowStatus { .. }
     );
 
     // Drag state for mouse border resize (per-client)
@@ -271,7 +271,8 @@ async fn handle_client(
             &mut term_rows,
             &mut term_cols,
             &mut drag_left_pane,
-        ).await?;
+        )
+        .await?;
         if let HandleResult::Reply(response) = result {
             let line = encode_signed_server(&auth, response)?;
             write_half.write_all(line.as_bytes()).await?;
@@ -291,7 +292,14 @@ async fn handle_client(
     // ── TUI client: full interactive session ──────────────────────────────
 
     // Process the first message (Init or GetState)
-    handle_client_message(first_msg, &state, &mut term_rows, &mut term_cols, &mut drag_left_pane).await?;
+    handle_client_message(
+        first_msg,
+        &state,
+        &mut term_rows,
+        &mut term_cols,
+        &mut drag_left_pane,
+    )
+    .await?;
 
     // Now send initial state
     {
@@ -399,8 +407,12 @@ async fn handle_client_message(
             let mut sess = state.session.lock().await;
             match action {
                 Action::Detach => return Ok(HandleResult::Detach),
-                Action::SplitHorizontal => { sess.active_window().split_horizontal()?; }
-                Action::SplitVertical => { sess.active_window().split_vertical()?; }
+                Action::SplitHorizontal => {
+                    sess.active_window().split_horizontal()?;
+                }
+                Action::SplitVertical => {
+                    sess.active_window().split_vertical()?;
+                }
                 Action::FocusLeft => sess.active_window().focus_left(),
                 Action::FocusRight => sess.active_window().focus_right(),
                 Action::FocusUp => sess.active_window().focus_up(),
@@ -458,8 +470,11 @@ async fn handle_client_message(
         // ═══════════════════════════════════════════════════════════════════
         // CLI query handlers — real implementations using daemon-owned state
         // ═══════════════════════════════════════════════════════════════════
-
-        ClientMessage::AgentSpawn { agent_type, name, model } => {
+        ClientMessage::AgentSpawn {
+            agent_type,
+            name,
+            model,
+        } => {
             // Check for duplicate name (short lock)
             {
                 let reg = state.agents.lock().await;
@@ -471,11 +486,8 @@ async fn handle_client_message(
 
             let (agent_spawn, config) = {
                 let bmux_config = state.bmux_config.lock().expect("config mutex");
-                let runtime = AgentRuntime::new(
-                    &bmux_config,
-                    &state.envelope,
-                    &state.ipc_socket_path,
-                );
+                let runtime =
+                    AgentRuntime::new(&bmux_config, &state.envelope, &state.ipc_socket_path);
                 let ipc_key = state.task_router.message_bus().hmac_key_bytes();
 
                 let config = if agent_type == "custom" {
@@ -499,17 +511,12 @@ async fn handle_client_message(
                 };
 
                 if agent_type != "shell" && which::which(&config.binary).is_err() {
-                    let data =
-                        format!("Error: Agent binary '{}' not found in PATH", config.binary);
+                    let data = format!("Error: Agent binary '{}' not found in PATH", config.binary);
                     return Ok(HandleResult::Reply(ServerMessage::QueryResult { data }));
                 }
 
-                let agent_spawn = runtime.build_pty_command(
-                    &name,
-                    &agent_type,
-                    &config,
-                    Some(ipc_key),
-                );
+                let agent_spawn =
+                    runtime.build_pty_command(&name, &agent_type, &config, Some(ipc_key));
                 (agent_spawn, config)
             };
 
@@ -540,23 +547,30 @@ async fn handle_client_message(
             } // agents lock dropped here
 
             // Register in TaskRouter (no lock contention)
-            state.task_router.register_agent(task_router::AgentInfo {
-                id: name.clone(),
-                agent_type: agent_type.clone(),
-                model_name: model_name.clone(),
-                cost_per_1k_tokens: cost,
-                capabilities: vec![],
-                idle_since: Some(std::time::Instant::now()),
-            }).await;
+            state
+                .task_router
+                .register_agent(task_router::AgentInfo {
+                    id: name.clone(),
+                    agent_type: agent_type.clone(),
+                    model_name: model_name.clone(),
+                    cost_per_1k_tokens: cost,
+                    capabilities: vec![],
+                    idle_since: Some(std::time::Instant::now()),
+                })
+                .await;
 
-            let _ = state.envelope.log_agent_spawned(&name, &agent_type, &model_name);
+            let _ = state
+                .envelope
+                .log_agent_spawned(&name, &agent_type, &model_name);
 
             let data = format!(
                 "Agent '{}' spawned successfully (pane: {} [{}])\n\
                  Pane ID: {}\n\
                  Session: {}\n\
                  Env: BMUX_SESSION={} BMUX_SOCKET={}",
-                name, icon, name,
+                name,
+                icon,
+                name,
                 pane_id,
                 state.session_name,
                 state.session_name,
@@ -640,7 +654,11 @@ async fn handle_client_message(
             return Ok(HandleResult::Reply(ServerMessage::QueryResult { data }));
         }
 
-        ClientMessage::TaskSend { agent, content, model } => {
+        ClientMessage::TaskSend {
+            agent,
+            content,
+            model,
+        } => {
             // Determine the target agent name (direct or auto-routed)
             let (data, _target_agent, _task_id) = if let Some(ref agent_name) = agent {
                 // Direct send to named agent
@@ -689,7 +707,9 @@ async fn handle_client_message(
                 for t in &tasks {
                     lines.push(format!(
                         "{:<10} {:<15} {:<12} {}",
-                        t.id, t.destination, t.status,
+                        t.id,
+                        t.destination,
+                        t.status,
                         t.submitted_at.format("%H:%M:%S"),
                     ));
                 }
@@ -702,7 +722,10 @@ async fn handle_client_message(
             let data = match state.task_router.cancel_task(&id).await {
                 Ok(task_router::CancelResult::Cancelled) => format!("Task '{}' cancelled.", id),
                 Ok(task_router::CancelResult::AlreadyActive) => {
-                    format!("Error: Task '{}' is already in progress — cannot cancel.", id)
+                    format!(
+                        "Error: Task '{}' is already in progress — cannot cancel.",
+                        id
+                    )
                 }
                 Err(e) => format!("Error: {}", e),
             };
@@ -713,7 +736,9 @@ async fn handle_client_message(
             let data = match state.task_router.task_status(&id).await {
                 Some(task) => format!(
                     "Task: {}\nAgent: {}\nStatus: {}\nSubmitted: {}\nContent: {}",
-                    task.id, task.destination, task.status,
+                    task.id,
+                    task.destination,
+                    task.status,
                     task.submitted_at.format("%Y-%m-%d %H:%M:%S"),
                     task.content,
                 ),
@@ -725,10 +750,7 @@ async fn handle_client_message(
         ClientMessage::ContextSet { key, value, author } => {
             let writer = author.as_deref().unwrap_or("cli");
             let scrubbed = state.envelope.scrub(&value);
-            let data = match state
-                .context
-                .set_with_author(&key, &scrubbed, None, writer)
-            {
+            let data = match state.context.set_with_author(&key, &scrubbed, None, writer) {
                 Ok(()) => {
                     let _ = state.envelope.log_context_set(&key, &scrubbed);
                     format!("Set '{}' (author: {}).", key, writer)
@@ -819,12 +841,7 @@ fn build_snapshot(sess: &Session) -> SessionSnapshot {
 }
 
 /// Deliver sanitized task content to an agent's PTY pane.
-async fn deliver_task_to_pane(
-    state: &DaemonState,
-    agent_id: &str,
-    task_id: &str,
-    content: &str,
-) {
+async fn deliver_task_to_pane(state: &DaemonState, agent_id: &str, task_id: &str, content: &str) {
     let input = match state.envelope.sanitize_task_content(content) {
         Ok(bytes) => bytes,
         Err(e) => {
@@ -872,13 +889,8 @@ fn spawn_task_dispatch_subscriber(state: Arc<DaemonState>) {
         loop {
             match rx.recv().await {
                 Ok(event) => {
-                    deliver_task_to_pane(
-                        &state,
-                        &event.agent_id,
-                        &event.task_id,
-                        &event.content,
-                    )
-                    .await;
+                    deliver_task_to_pane(&state, &event.agent_id, &event.task_id, &event.content)
+                        .await;
                 }
                 Err(broadcast::error::RecvError::Lagged(n)) => {
                     tracing::warn!("Task dispatch subscriber lagged by {n} messages");
@@ -898,10 +910,8 @@ fn spawn_result_subscriber(router: Arc<TaskRouter>) {
                 Ok(msg) if msg.msg_type == MessageType::Result => {
                     match serde_json::from_value::<ResultPayload>(msg.payload) {
                         Ok(payload) => {
-                            let task_full_id = payload
-                                .task_id
-                                .clone()
-                                .unwrap_or_else(|| msg.id.clone());
+                            let task_full_id =
+                                payload.task_id.clone().unwrap_or_else(|| msg.id.clone());
                             if let Err(e) = router.handle_result(&task_full_id, payload).await {
                                 tracing::warn!(
                                     task_id = %task_full_id,

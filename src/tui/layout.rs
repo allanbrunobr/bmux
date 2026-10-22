@@ -106,19 +106,21 @@ impl Layout {
         match self {
             Layout::Leaf(id) => vec![(*id, area)],
             Layout::HSplit { left, right, ratio } => {
-                let split = ((area.width as f32 * ratio) as u16).max(1).min(area.width - 1);
+                let split = ((area.width as f32 * ratio) as u16)
+                    .max(1)
+                    .min(area.width - 1);
                 let left_rect = Rect::new(area.x, area.y, split, area.height);
-                let right_rect =
-                    Rect::new(area.x + split, area.y, area.width - split, area.height);
+                let right_rect = Rect::new(area.x + split, area.y, area.width - split, area.height);
                 let mut v = left.compute_rects(left_rect);
                 v.extend(right.compute_rects(right_rect));
                 v
             }
             Layout::VSplit { top, bottom, ratio } => {
-                let split = ((area.height as f32 * ratio) as u16).max(1).min(area.height - 1);
+                let split = ((area.height as f32 * ratio) as u16)
+                    .max(1)
+                    .min(area.height - 1);
                 let top_rect = Rect::new(area.x, area.y, area.width, split);
-                let bot_rect =
-                    Rect::new(area.x, area.y + split, area.width, area.height - split);
+                let bot_rect = Rect::new(area.x, area.y + split, area.width, area.height - split);
                 let mut v = top.compute_rects(top_rect);
                 v.extend(bottom.compute_rects(bot_rect));
                 v
@@ -130,12 +132,8 @@ impl Layout {
     pub fn contains(&self, pane_id: usize) -> bool {
         match self {
             Layout::Leaf(id) => *id == pane_id,
-            Layout::HSplit { left, right, .. } => {
-                left.contains(pane_id) || right.contains(pane_id)
-            }
-            Layout::VSplit { top, bottom, .. } => {
-                top.contains(pane_id) || bottom.contains(pane_id)
-            }
+            Layout::HSplit { left, right, .. } => left.contains(pane_id) || right.contains(pane_id),
+            Layout::VSplit { top, bottom, .. } => top.contains(pane_id) || bottom.contains(pane_id),
         }
     }
 
@@ -156,10 +154,7 @@ impl Layout {
         rects
             .iter()
             .filter(|(id, r)| {
-                *id != pane_id
-                    && r.x + r.width <= cur.x
-                    && r.y <= cy
-                    && cy < r.y + r.height
+                *id != pane_id && r.x + r.width <= cur.x && r.y <= cy && cy < r.y + r.height
             })
             .max_by_key(|(_, r)| r.x + r.width)
             .map(|(id, _)| *id)
@@ -173,10 +168,7 @@ impl Layout {
         rects
             .iter()
             .filter(|(id, r)| {
-                *id != pane_id
-                    && r.x >= cur.x + cur.width
-                    && r.y <= cy
-                    && cy < r.y + r.height
+                *id != pane_id && r.x >= cur.x + cur.width && r.y <= cy && cy < r.y + r.height
             })
             .min_by_key(|(_, r)| r.x)
             .map(|(id, _)| *id)
@@ -190,10 +182,7 @@ impl Layout {
         rects
             .iter()
             .filter(|(id, r)| {
-                *id != pane_id
-                    && r.y + r.height <= cur.y
-                    && r.x <= cx
-                    && cx < r.x + r.width
+                *id != pane_id && r.y + r.height <= cur.y && r.x <= cx && cx < r.x + r.width
             })
             .max_by_key(|(_, r)| r.y + r.height)
             .map(|(id, _)| *id)
@@ -207,10 +196,7 @@ impl Layout {
         rects
             .iter()
             .filter(|(id, r)| {
-                *id != pane_id
-                    && r.y >= cur.y + cur.height
-                    && r.x <= cx
-                    && cx < r.x + r.width
+                *id != pane_id && r.y >= cur.y + cur.height && r.x <= cx && cx < r.x + r.width
             })
             .min_by_key(|(_, r)| r.y)
             .map(|(id, _)| *id)
@@ -245,14 +231,28 @@ impl Layout {
                 // Recurse into both subtrees with their computed sub-areas
                 let split = (area.width as f32 * *ratio) as u16;
                 let left_area = Rect::new(area.x, area.y, split.max(1), area.height);
-                let right_area = Rect::new(area.x + split, area.y, area.width.saturating_sub(split), area.height);
+                let right_area = Rect::new(
+                    area.x + split,
+                    area.y,
+                    area.width.saturating_sub(split),
+                    area.height,
+                );
                 left.set_hsplit_ratio_at(left_pane_id, mouse_x, left_area);
                 right.set_hsplit_ratio_at(left_pane_id, mouse_x, right_area);
             }
-            Layout::VSplit { top, bottom, ratio: r } => {
+            Layout::VSplit {
+                top,
+                bottom,
+                ratio: r,
+            } => {
                 let split = (area.height as f32 * *r) as u16;
                 let top_area = Rect::new(area.x, area.y, area.width, split.max(1));
-                let bot_area = Rect::new(area.x, area.y + split, area.width, area.height.saturating_sub(split));
+                let bot_area = Rect::new(
+                    area.x,
+                    area.y + split,
+                    area.width,
+                    area.height.saturating_sub(split),
+                );
                 top.set_hsplit_ratio_at(left_pane_id, mouse_x, top_area);
                 bottom.set_hsplit_ratio_at(left_pane_id, mouse_x, bot_area);
             }

@@ -5,12 +5,15 @@
 // This is the same PTY pattern used by src/tui/pane.rs.
 
 use std::io::{Read, Write};
-use std::sync::{Arc, Mutex, atomic::{AtomicBool, Ordering}};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc, Mutex,
+};
 use std::time::Instant;
 
 use anyhow::Context;
 use async_trait::async_trait;
-use portable_pty::{CommandBuilder, MasterPty, PtySize, native_pty_system};
+use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
 
 use crate::agents::adapter::{AgentAdapter, AgentConfig, AgentOutput, AgentStatus, Task};
 
@@ -124,10 +127,7 @@ impl AgentAdapter for GenericCliAdapter {
     async fn spawn(&mut self, config: &AgentConfig) -> anyhow::Result<()> {
         // For non-shell agents, verify binary exists before spawning
         if self.agent_type != "shell" && which::which(&config.binary).is_err() {
-            anyhow::bail!(
-                "Agent binary '{}' not found in PATH",
-                config.binary
-            );
+            anyhow::bail!("Agent binary '{}' not found in PATH", config.binary);
         }
 
         // ── Step 1: Spawn a login shell in the PTY ───────────────────────
@@ -160,10 +160,10 @@ impl AgentAdapter for GenericCliAdapter {
         cmd.env("BMUX_AGENT_TYPE", &self.agent_type);
         cmd.env("TERM", "xterm-256color");
 
-        let child = pair
-            .slave
-            .spawn_command(cmd)
-            .context(format!("Failed to spawn login shell for agent '{}'", self.id))?;
+        let child = pair.slave.spawn_command(cmd).context(format!(
+            "Failed to spawn login shell for agent '{}'",
+            self.id
+        ))?;
 
         self.child_pid = child.process_id();
 
@@ -231,7 +231,9 @@ impl AgentAdapter for GenericCliAdapter {
 
             // Send the command to the shell
             {
-                let writer_ref = self.pty_writer.as_ref()
+                let writer_ref = self
+                    .pty_writer
+                    .as_ref()
                     .context("PTY writer not available")?;
                 let mut w = writer_ref.lock().unwrap();
                 w.write_all(agent_cmd.as_bytes())?;
@@ -378,9 +380,10 @@ mod tests {
         };
         let result = a.spawn(&cfg).await;
         assert!(result.is_err());
-        assert!(
-            result.unwrap_err().to_string().contains("not found in PATH"),
-        );
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("not found in PATH"),);
     }
 
     #[tokio::test]
@@ -408,6 +411,9 @@ mod tests {
         let mut a = GenericCliAdapter::new("t", "test", "m", 0.001);
         a.set_session_context("my-session", "/tmp/bmux-my-session-ipc.sock");
         assert_eq!(a.session_name.as_deref(), Some("my-session"));
-        assert_eq!(a.socket_path.as_deref(), Some("/tmp/bmux-my-session-ipc.sock"));
+        assert_eq!(
+            a.socket_path.as_deref(),
+            Some("/tmp/bmux-my-session-ipc.sock")
+        );
     }
 }

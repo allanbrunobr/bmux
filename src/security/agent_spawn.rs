@@ -38,7 +38,9 @@ pub fn build_agent_pty_command(
     let inner = if agent_type == "shell" {
         build_shell_command(binary, args)
     } else {
-        build_isolated_command(envelope, ipc_socket, agent_name, agent_type, binary, args, model)
+        build_isolated_command(
+            envelope, ipc_socket, agent_name, agent_type, binary, args, model,
+        )
     };
 
     let mut cmd = wrap_sandbox(envelope, agent_name, agent_type, inner);
@@ -74,11 +76,7 @@ fn attach_secret_fd(
 }
 
 #[cfg(unix)]
-fn attach_ipc_hmac_fd(
-    key: Option<&[u8]>,
-    cmd: &mut CommandBuilder,
-    inject_fds: &mut Vec<RawFd>,
-) {
+fn attach_ipc_hmac_fd(key: Option<&[u8]>, cmd: &mut CommandBuilder, inject_fds: &mut Vec<RawFd>) {
     let Some(key_bytes) = key else { return };
     if key_bytes.len() < 32 {
         return;
@@ -217,7 +215,9 @@ fn wrap_with_bwrap(envelope: &SecurityEnvelope, inner: CommandBuilder) -> Comman
     wrap.arg("--new-session");
     wrap.arg("--bind").arg(&project).arg(&project);
     wrap.arg("--bind").arg("/tmp").arg("/tmp");
-    for sys in ["/usr", "/lib", "/lib64", "/bin", "/sbin", "/etc", "/dev", "/proc"] {
+    for sys in [
+        "/usr", "/lib", "/lib64", "/bin", "/sbin", "/etc", "/dev", "/proc",
+    ] {
         if Path::new(sys).exists() {
             if sys == "/dev" || sys == "/proc" {
                 wrap.arg("--dev-bind").arg(sys).arg(sys);

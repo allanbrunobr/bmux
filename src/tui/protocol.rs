@@ -33,13 +33,21 @@ pub enum ClientMessage {
     /// Get detailed status for one agent.
     AgentStatus { name: String },
     /// Spawn an agent.
-    AgentSpawn { agent_type: String, name: String, model: Option<String> },
+    AgentSpawn {
+        agent_type: String,
+        name: String,
+        model: Option<String>,
+    },
     /// Kill an agent.
     AgentKill { name: String },
     /// List all tasks.
     TaskList,
     /// Send a task to a specific agent.
-    TaskSend { agent: Option<String>, content: String, model: Option<String> },
+    TaskSend {
+        agent: Option<String>,
+        content: String,
+        model: Option<String>,
+    },
     /// Cancel a queued task.
     TaskCancel { id: String },
     /// Get task status.
@@ -59,10 +67,7 @@ pub enum ClientMessage {
     /// Dump context as JSON.
     ContextDump,
     /// Run a workflow YAML file in the background.
-    WorkflowRun {
-        file: String,
-        input: Option<String>,
-    },
+    WorkflowRun { file: String, input: Option<String> },
     /// Get workflow run status by ID.
     WorkflowStatus { id: String },
 }

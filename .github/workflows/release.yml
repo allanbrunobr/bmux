@@ -39,7 +39,7 @@ jobs:
             asset_suffix: linux-aarch64
 
           - target: x86_64-apple-darwin
-            runner: macos-13           # Intel macOS runner
+            runner: macos-latest       # cross-compiles to Intel on Apple Silicon
             use_cross: false
             asset_suffix: macos-x86_64
 

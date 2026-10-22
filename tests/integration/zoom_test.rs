@@ -23,7 +23,10 @@ fn integration_zoom_toggle_hides_other_panes() {
     // Un-zoom — all panes visible again
     zoom.toggle(3);
     for &p in &panes {
-        assert!(zoom.is_pane_visible(p), "Pane {p} should be visible after un-zoom");
+        assert!(
+            zoom.is_pane_visible(p),
+            "Pane {p} should be visible after un-zoom"
+        );
     }
 }
 

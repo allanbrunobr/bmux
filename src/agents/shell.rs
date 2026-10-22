@@ -7,8 +7,8 @@ use std::time::Instant;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::{Child, ChildStdin, ChildStdout, Command};
 
-use async_trait::async_trait;
 use anyhow::Context;
+use async_trait::async_trait;
 
 use crate::agents::adapter::{AgentAdapter, AgentConfig, AgentOutput, AgentStatus, Task};
 
@@ -39,9 +39,7 @@ impl ShellAdapter {
 
     /// Returns the uptime in seconds since spawn, or 0 if not yet spawned.
     pub fn uptime_seconds(&self) -> u64 {
-        self.spawned_at
-            .map(|t| t.elapsed().as_secs())
-            .unwrap_or(0)
+        self.spawned_at.map(|t| t.elapsed().as_secs()).unwrap_or(0)
     }
 
     /// Returns true if the child process is currently running.
@@ -85,12 +83,17 @@ impl AgentAdapter for ShellAdapter {
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped());
 
-        let mut child = cmd.spawn()
+        let mut child = cmd
+            .spawn()
             .with_context(|| format!("Failed to spawn shell agent '{}'", self.id))?;
 
-        let stdin = child.stdin.take()
+        let stdin = child
+            .stdin
+            .take()
             .ok_or_else(|| anyhow::anyhow!("Failed to capture stdin for shell agent"))?;
-        let stdout = child.stdout.take()
+        let stdout = child
+            .stdout
+            .take()
             .ok_or_else(|| anyhow::anyhow!("Failed to capture stdout for shell agent"))?;
 
         self.stdin = Some(stdin);
@@ -122,7 +125,9 @@ impl AgentAdapter for ShellAdapter {
 
         if let Some(reader) = &mut self.stdout_reader {
             let mut line = String::new();
-            reader.read_line(&mut line).await
+            reader
+                .read_line(&mut line)
+                .await
                 .context("Failed to read output from shell agent")?;
 
             Ok(AgentOutput {
@@ -132,7 +137,10 @@ impl AgentAdapter for ShellAdapter {
                 duration_ms: start.elapsed().as_millis() as u64,
             })
         } else {
-            Err(anyhow::anyhow!("Shell agent '{}' has no stdout reader", self.id))
+            Err(anyhow::anyhow!(
+                "Shell agent '{}' has no stdout reader",
+                self.id
+            ))
         }
     }
 
@@ -142,7 +150,9 @@ impl AgentAdapter for ShellAdapter {
 
     async fn kill(&mut self) -> anyhow::Result<()> {
         if let Some(mut child) = self.child.take() {
-            child.kill().await
+            child
+                .kill()
+                .await
                 .with_context(|| format!("Failed to kill shell agent '{}'", self.id))?;
             child.wait().await.ok();
             tracing::info!(id = %self.id, "Shell agent killed");
@@ -214,7 +224,10 @@ mod tests {
         };
         let result = agent.spawn(&config).await;
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("not found in PATH"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("not found in PATH"));
     }
 
     #[tokio::test]

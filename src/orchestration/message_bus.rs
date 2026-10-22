@@ -112,8 +112,7 @@ pub fn sign_message(key: &hmac::Key, msg: &mut IpcMessage) -> Result<()> {
 /// Verify a message's HMAC. Returns `Ok(true)` if valid, `Ok(false)` if tampered.
 pub fn verify_message(key: &hmac::Key, msg: &IpcMessage) -> Result<bool> {
     let bytes = signable_bytes(msg)?;
-    let tag_bytes =
-        hex::decode(&msg.hmac).map_err(|e| anyhow!("Invalid HMAC hex: {e}"))?;
+    let tag_bytes = hex::decode(&msg.hmac).map_err(|e| anyhow!("Invalid HMAC hex: {e}"))?;
     Ok(hmac::verify(key, &bytes, &tag_bytes).is_ok())
 }
 
@@ -148,8 +147,7 @@ impl MessageBus {
     pub fn new(session_id: impl Into<String>) -> Result<Self> {
         let session_id = session_id.into();
         // Use a separate socket for the agent IPC bus (distinct from the TUI daemon socket)
-        let socket_path =
-            PathBuf::from(format!("/tmp/bmux-{}-ipc.sock", session_id));
+        let socket_path = PathBuf::from(format!("/tmp/bmux-{}-ipc.sock", session_id));
         let key_bytes = crate::security::hmac::generate_key()
             .map_err(|e| anyhow!("HMAC key generation failed: {e}"))?;
         let hmac_key = Arc::new(hmac::Key::new(hmac::HMAC_SHA256, &key_bytes));
@@ -202,10 +200,7 @@ impl MessageBus {
         let listener = UnixListener::bind(&self.socket_path)?;
 
         // Restrict permissions to owner-only (0600)
-        std::fs::set_permissions(
-            &self.socket_path,
-            std::fs::Permissions::from_mode(0o600),
-        )?;
+        std::fs::set_permissions(&self.socket_path, std::fs::Permissions::from_mode(0o600))?;
 
         info!(
             session = %self.session_id,
@@ -299,8 +294,7 @@ async fn handle_connection(
         if msg.msg_type == MessageType::Heartbeat {
             if let Ok(h) = serde_json::from_value::<HeartbeatPayload>(msg.payload.clone()) {
                 let mut map = agent_status.write().await;
-                map.entry(h.agent_id.clone())
-                    .or_insert(AgentState::Idle);
+                map.entry(h.agent_id.clone()).or_insert(AgentState::Idle);
                 info!(agent = %h.agent_id, uptime = h.uptime_seconds, "Heartbeat received");
             }
         }
@@ -381,10 +375,7 @@ mod hex {
         }
         (0..s.len())
             .step_by(2)
-            .map(|i| {
-                u8::from_str_radix(&s[i..i + 2], 16)
-                    .map_err(|e| e.to_string())
-            })
+            .map(|i| u8::from_str_radix(&s[i..i + 2], 16).map_err(|e| e.to_string()))
             .collect()
     }
 }
@@ -458,7 +449,10 @@ mod tests {
 
         sign_message(&b1.hmac_key, &mut msg1).unwrap();
         sign_message(&b2.hmac_key, &mut msg2).unwrap();
-        assert_ne!(msg1.hmac, msg2.hmac, "separate sessions must have distinct keys");
+        assert_ne!(
+            msg1.hmac, msg2.hmac,
+            "separate sessions must have distinct keys"
+        );
     }
 
     // ------------------------------------------------------------------
@@ -478,7 +472,10 @@ mod tests {
             hmac: String::new(),
         };
         sign_message(&key, &mut msg).unwrap();
-        assert!(verify_message(&key, &msg).unwrap(), "valid HMAC should pass");
+        assert!(
+            verify_message(&key, &msg).unwrap(),
+            "valid HMAC should pass"
+        );
     }
 
     #[test]
@@ -497,7 +494,10 @@ mod tests {
 
         // Tamper after signing
         msg.payload = serde_json::json!({"content": "tampered"});
-        assert!(!verify_message(&key, &msg).unwrap(), "tampered message must fail HMAC");
+        assert!(
+            !verify_message(&key, &msg).unwrap(),
+            "tampered message must fail HMAC"
+        );
     }
 
     #[test]
@@ -514,7 +514,10 @@ mod tests {
             hmac: String::new(),
         };
         sign_message(&key1, &mut msg).unwrap();
-        assert!(!verify_message(&key2, &msg).unwrap(), "wrong key must fail verification");
+        assert!(
+            !verify_message(&key2, &msg).unwrap(),
+            "wrong key must fail verification"
+        );
     }
 
     #[test]
@@ -529,7 +532,10 @@ mod tests {
             timestamp: Utc::now(),
             hmac: "not-valid-hex!".into(),
         };
-        assert!(verify_message(&key, &msg).is_err(), "invalid hex should return Err");
+        assert!(
+            verify_message(&key, &msg).is_err(),
+            "invalid hex should return Err"
+        );
     }
 
     // ------------------------------------------------------------------
@@ -548,9 +554,14 @@ mod tests {
         })
         .unwrap();
 
-        let msg = MessageBuilder::new("agent-arch", "bus", MessageType::Heartbeat, heartbeat_payload)
-            .build_signed(&bus.hmac_key)
-            .unwrap();
+        let msg = MessageBuilder::new(
+            "agent-arch",
+            "bus",
+            MessageType::Heartbeat,
+            heartbeat_payload,
+        )
+        .build_signed(&bus.hmac_key)
+        .unwrap();
 
         bus.send_message(&msg).await.expect("send failed");
         sleep(Duration::from_millis(50)).await;
@@ -590,7 +601,10 @@ mod tests {
         sleep(Duration::from_millis(50)).await;
 
         // No valid message should be received
-        assert!(rx.try_recv().is_err(), "bad-HMAC message must not be broadcast");
+        assert!(
+            rx.try_recv().is_err(),
+            "bad-HMAC message must not be broadcast"
+        );
 
         bus.stop();
     }
@@ -645,9 +659,14 @@ mod tests {
             max_cost_usd: None,
         })
         .unwrap();
-        let msg = MessageBuilder::new("orchestrator", "agent-coder", MessageType::Task, task_payload)
-            .build_signed(&bus.hmac_key)
-            .unwrap();
+        let msg = MessageBuilder::new(
+            "orchestrator",
+            "agent-coder",
+            MessageType::Task,
+            task_payload,
+        )
+        .build_signed(&bus.hmac_key)
+        .unwrap();
         let sent_id = msg.id.clone();
 
         bus.send_message(&msg).await.expect("send failed");

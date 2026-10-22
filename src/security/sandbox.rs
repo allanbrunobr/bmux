@@ -73,9 +73,7 @@ pub fn apply_sandbox(
     agent_name: &str,
 ) -> Result<SandboxMode, SandboxError> {
     if mode_override == Some("none") {
-        warn!(
-            "Agent sandboxing disabled — running without filesystem restrictions"
-        );
+        warn!("Agent sandboxing disabled — running without filesystem restrictions");
         return Ok(SandboxMode::None);
     }
 
@@ -100,9 +98,7 @@ fn apply_platform_sandbox(
         apply_landlock(project_dir)?;
         Ok(SandboxMode::Landlock)
     } else {
-        warn!(
-            "Landlock unavailable — using namespace isolation (reduced protection)"
-        );
+        warn!("Landlock unavailable — using namespace isolation (reduced protection)");
         apply_namespace_isolation(project_dir, agent_name)?;
         Ok(SandboxMode::Namespace)
     }
@@ -127,8 +123,7 @@ pub fn is_landlock_supported() -> bool {
 #[cfg(target_os = "linux")]
 fn apply_landlock(project_dir: &Path) -> Result<(), SandboxError> {
     use landlock::{
-        path_beneath_rules, Access, AccessFs, Ruleset, RulesetAttr,
-        RulesetCreatedAttr, ABI,
+        path_beneath_rules, Access, AccessFs, Ruleset, RulesetAttr, RulesetCreatedAttr, ABI,
     };
 
     let abi = ABI::V3;
@@ -150,9 +145,7 @@ fn apply_landlock(project_dir: &Path) -> Result<(), SandboxError> {
     .filter(|p| p.exists())
     .collect();
 
-    let ruleset = Ruleset::default()
-        .handle_access(rw_access)?
-        .create()?;
+    let ruleset = Ruleset::default().handle_access(rw_access)?.create()?;
 
     let ruleset = ruleset
         .add_rules(path_beneath_rules(&rw_paths, rw_access))?
@@ -165,10 +158,7 @@ fn apply_landlock(project_dir: &Path) -> Result<(), SandboxError> {
 
 /// Fallback: enter a new mount namespace and bind-mount only the project dir.
 #[cfg(target_os = "linux")]
-fn apply_namespace_isolation(
-    project_dir: &Path,
-    agent_name: &str,
-) -> Result<(), SandboxError> {
+fn apply_namespace_isolation(project_dir: &Path, agent_name: &str) -> Result<(), SandboxError> {
     use nix::sched::{unshare, CloneFlags};
 
     unshare(CloneFlags::CLONE_NEWNS).map_err(|e| {
@@ -217,7 +207,11 @@ fn apply_seatbelt(project_dir: &Path) -> Result<(), SandboxError> {
 
     if rc != 0 {
         let msg = if !errorbuf.is_null() {
-            let s = unsafe { std::ffi::CStr::from_ptr(errorbuf).to_string_lossy().into_owned() };
+            let s = unsafe {
+                std::ffi::CStr::from_ptr(errorbuf)
+                    .to_string_lossy()
+                    .into_owned()
+            };
             unsafe { sandbox_free_error(errorbuf) };
             s
         } else {
@@ -326,10 +320,7 @@ mod tests {
         // Accept "not permitted" as a valid outcome on macOS.
         #[cfg(target_os = "macos")]
         match &result {
-            Ok(mode) => assert!(matches!(
-                mode,
-                SandboxMode::Seatbelt | SandboxMode::None
-            )),
+            Ok(mode) => assert!(matches!(mode, SandboxMode::Seatbelt | SandboxMode::None)),
             Err(e) => {
                 let msg = e.to_string();
                 assert!(
@@ -341,7 +332,11 @@ mod tests {
 
         #[cfg(target_os = "linux")]
         {
-            assert!(result.is_ok(), "Linux sandbox must succeed: {:?}", result.err());
+            assert!(
+                result.is_ok(),
+                "Linux sandbox must succeed: {:?}",
+                result.err()
+            );
             let mode = result.unwrap();
             assert!(matches!(
                 mode,

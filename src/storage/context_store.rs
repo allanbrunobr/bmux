@@ -247,17 +247,15 @@ impl ContextStore {
     // ─── helper ──────────────────────────────────────────────────────────────
 
     fn is_expired(&self, entry: &StoredEntry) -> bool {
-        entry
-            .expires_at
-            .is_some_and(|exp| exp <= Self::now_secs())
+        entry.expires_at.is_some_and(|exp| exp <= Self::now_secs())
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::TempDir;
     use serial_test::serial;
+    use tempfile::TempDir;
 
     fn make_store() -> (ContextStore, TempDir) {
         let dir = TempDir::new().unwrap();
@@ -267,17 +265,17 @@ mod tests {
 
     // ── Story 4.1: basic set/get ──────────────────────────────────────────────
 
-    
     #[serial]
     #[test]
     fn test_set_and_get() {
         let (store, _dir) = make_store();
-        store.set("project:tech-stack", "Rust + ratatui + tokio", None).unwrap();
+        store
+            .set("project:tech-stack", "Rust + ratatui + tokio", None)
+            .unwrap();
         let val = store.get("project:tech-stack").unwrap();
         assert_eq!(val, Some("Rust + ratatui + tokio".to_string()));
     }
 
-    
     #[serial]
     #[test]
     fn test_get_nonexistent_returns_none() {
@@ -286,7 +284,6 @@ mod tests {
         assert_eq!(val, None);
     }
 
-    
     #[serial]
     #[test]
     fn test_list_shows_all_entries_with_preview() {
@@ -300,7 +297,6 @@ mod tests {
         assert!(keys.contains(&"key2"));
     }
 
-    
     #[serial]
     #[test]
     fn test_list_preview_truncated_to_80_chars() {
@@ -313,7 +309,6 @@ mod tests {
         assert!(list[0].1.len() <= 80);
     }
 
-    
     #[serial]
     #[test]
     fn test_agent_namespace_write_denied_for_other_agent() {
@@ -351,7 +346,6 @@ mod tests {
 
     // ── Story 4.3: TTL expiry ────────────────────────────────────────────────
 
-    
     #[serial]
     #[test]
     fn test_expired_entry_not_returned_on_get() {
@@ -366,13 +360,15 @@ mod tests {
             author: None,
         };
         let sled_key = store.sled_key("exp-key");
-        store.db.insert(sled_key, serde_json::to_vec(&entry).unwrap()).unwrap();
+        store
+            .db
+            .insert(sled_key, serde_json::to_vec(&entry).unwrap())
+            .unwrap();
 
         // get should return None
         assert_eq!(store.get("exp-key").unwrap(), None);
     }
 
-    
     #[serial]
     #[test]
     fn test_expired_entries_excluded_from_list() {
@@ -386,7 +382,13 @@ mod tests {
             expires_at: Some(1001),
             author: None,
         };
-        store.db.insert(store.sled_key("expired-key"), serde_json::to_vec(&expired).unwrap()).unwrap();
+        store
+            .db
+            .insert(
+                store.sled_key("expired-key"),
+                serde_json::to_vec(&expired).unwrap(),
+            )
+            .unwrap();
 
         // Insert valid
         store.set("valid-key", "here", None).unwrap();
@@ -396,7 +398,6 @@ mod tests {
         assert_eq!(list[0].0, "valid-key");
     }
 
-    
     #[serial]
     #[test]
     fn test_cleanup_expired_all() {
@@ -409,8 +410,14 @@ mod tests {
             expires_at: Some(1001),
             author: None,
         };
-        store.db.insert(store.sled_key("e1"), serde_json::to_vec(&expired).unwrap()).unwrap();
-        store.db.insert(store.sled_key("e2"), serde_json::to_vec(&expired).unwrap()).unwrap();
+        store
+            .db
+            .insert(store.sled_key("e1"), serde_json::to_vec(&expired).unwrap())
+            .unwrap();
+        store
+            .db
+            .insert(store.sled_key("e2"), serde_json::to_vec(&expired).unwrap())
+            .unwrap();
         store.set("live", "alive", None).unwrap();
 
         let removed = store.cleanup_expired_all().unwrap();
@@ -418,7 +425,6 @@ mod tests {
         assert_eq!(store.get("live").unwrap(), Some("alive".to_string()));
     }
 
-    
     #[serial]
     #[test]
     fn test_cleanup_session_removes_all_session_entries() {
@@ -434,7 +440,6 @@ mod tests {
 
     // ── Story 4.4: JSON dump ─────────────────────────────────────────────────
 
-    
     #[serial]
     #[test]
     fn test_dump_returns_all_entries_with_metadata() {
@@ -450,12 +455,13 @@ mod tests {
         assert!(k2.created_at > 0);
     }
 
-    
     #[serial]
     #[test]
     fn test_dump_json_is_valid_json() {
         let (store, _dir) = make_store();
-        store.set("project:tech-stack", "Rust + ratatui", None).unwrap();
+        store
+            .set("project:tech-stack", "Rust + ratatui", None)
+            .unwrap();
 
         let json = store.dump_json().unwrap();
         let parsed: Vec<serde_json::Value> = serde_json::from_str(&json).unwrap();
@@ -464,7 +470,6 @@ mod tests {
 
     // ── Session isolation ────────────────────────────────────────────────────
 
-    
     #[serial]
     #[test]
     fn test_different_sessions_are_isolated() {

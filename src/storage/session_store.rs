@@ -154,8 +154,8 @@ impl SessionStore {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::TempDir;
     use serial_test::serial;
+    use tempfile::TempDir;
 
     fn make_session_store() -> (SessionStore, TempDir) {
         let dir = TempDir::new().unwrap();
@@ -165,7 +165,6 @@ mod tests {
 
     // ── Story 4.3: session persistence ──────────────────────────────────────
 
-    
     #[serial]
     #[test]
     fn test_attach_creates_session() {
@@ -176,7 +175,6 @@ mod tests {
         assert_eq!(meta.state, SessionState::Active);
     }
 
-    
     #[serial]
     #[test]
     fn test_detach_preserves_session_metadata() {
@@ -188,7 +186,6 @@ mod tests {
         assert!(meta.detached_at.is_some());
     }
 
-    
     #[serial]
     #[test]
     fn test_reattach_restores_active_state() {
@@ -201,7 +198,6 @@ mod tests {
         assert_eq!(meta.detached_at, None);
     }
 
-    
     #[serial]
     #[test]
     fn test_kill_removes_context_entries() {
@@ -226,7 +222,6 @@ mod tests {
         assert!(ctx2.list().unwrap().is_empty());
     }
 
-    
     #[serial]
     #[test]
     fn test_context_persists_through_detach_reattach() {
@@ -251,7 +246,6 @@ mod tests {
         );
     }
 
-    
     #[serial]
     #[test]
     fn test_list_sessions() {
@@ -262,7 +256,6 @@ mod tests {
         assert_eq!(sessions.len(), 2);
     }
 
-    
     #[serial]
     #[test]
     fn test_kill_marks_session_terminated() {

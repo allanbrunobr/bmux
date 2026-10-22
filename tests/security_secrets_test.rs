@@ -51,7 +51,10 @@ fn integration_secrets_bad_permissions_warn_message() {
         err.contains("0644"),
         "warning must include actual permissions"
     );
-    assert!(err.contains("0600"), "warning must include expected permissions");
+    assert!(
+        err.contains("0600"),
+        "warning must include expected permissions"
+    );
 }
 
 #[test]
@@ -105,7 +108,9 @@ fn integration_secrets_fd_injection_does_not_set_env() {
     // Snapshot environment BEFORE
     let env_before: std::collections::HashMap<_, _> = std::env::vars().collect();
 
-    let fd = mgr.create_secret_fd("mykey").expect("create_secret_fd must succeed");
+    let fd = mgr
+        .create_secret_fd("mykey")
+        .expect("create_secret_fd must succeed");
     unsafe { libc::close(fd) };
 
     // Snapshot environment AFTER
@@ -119,5 +124,9 @@ fn integration_secrets_fd_injection_does_not_set_env() {
         );
     }
     // The env should be unchanged
-    assert_eq!(env_before.len(), env_after.len(), "env must not gain new vars");
+    assert_eq!(
+        env_before.len(),
+        env_after.len(),
+        "env must not gain new vars"
+    );
 }

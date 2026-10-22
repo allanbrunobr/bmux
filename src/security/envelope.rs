@@ -180,10 +180,7 @@ impl SecurityEnvelope {
     ) -> Vec<(String, String)> {
         let mut pairs = vec![
             ("BMUX_SESSION".to_string(), self.session_id.clone()),
-            (
-                "BMUX_SOCKET".to_string(),
-                ipc_socket.display().to_string(),
-            ),
+            ("BMUX_SOCKET".to_string(), ipc_socket.display().to_string()),
             ("BMUX_AGENT_NAME".to_string(), agent_name.to_string()),
             ("BMUX_AGENT_TYPE".to_string(), agent_type.to_string()),
             (
@@ -193,10 +190,7 @@ impl SecurityEnvelope {
         ];
         if let Some(path) = SecretsManager::default_path() {
             if path.exists() && !self.secrets.is_empty() {
-                pairs.push((
-                    "BMUX_SECRETS_PATH".to_string(),
-                    path.display().to_string(),
-                ));
+                pairs.push(("BMUX_SECRETS_PATH".to_string(), path.display().to_string()));
             }
         }
         pairs
@@ -214,7 +208,12 @@ impl SecurityEnvelope {
             .collect()
     }
 
-    fn wrap_sandbox_if_enabled(&self, inner_cmd: &str, agent_name: &str, agent_type: &str) -> String {
+    fn wrap_sandbox_if_enabled(
+        &self,
+        inner_cmd: &str,
+        agent_name: &str,
+        agent_type: &str,
+    ) -> String {
         if agent_type == "shell" || self.security.sandbox == "none" {
             return inner_cmd.to_string();
         }
@@ -271,7 +270,11 @@ impl SecurityEnvelope {
         Ok(())
     }
 
-    pub fn log_agent_killed(&self, agent_name: &str, agent_type: &str) -> Result<(), EnvelopeError> {
+    pub fn log_agent_killed(
+        &self,
+        agent_name: &str,
+        agent_type: &str,
+    ) -> Result<(), EnvelopeError> {
         let mut audit = self.audit.lock().expect("audit mutex");
         audit.log_event(AuditEntry::new(
             EventType::AgentKilled,
@@ -350,12 +353,7 @@ mod tests {
     fn isolated_launch_uses_env_i() {
         let mut security = SecurityConfig::default();
         security.sandbox = "none".to_string();
-        let env = SecurityEnvelope::new(
-            "test",
-            PathBuf::from("/tmp/project"),
-            security,
-            false,
-        );
+        let env = SecurityEnvelope::new("test", PathBuf::from("/tmp/project"), security, false);
         let cmd = env.build_agent_launch_command(
             "arch",
             Path::new("/tmp/bmux-test-ipc.sock"),

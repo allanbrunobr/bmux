@@ -105,10 +105,7 @@ impl SecretsManager {
     /// The child reads the value from fd `n` at startup, then closes it.
     ///
     /// This keeps the actual secret value out of the environment entirely.
-    pub fn create_secret_fd(
-        &self,
-        key: &str,
-    ) -> Result<std::os::unix::io::RawFd, SecretsError> {
+    pub fn create_secret_fd(&self, key: &str) -> Result<std::os::unix::io::RawFd, SecretsError> {
         let value = self
             .keys
             .get(key)
@@ -117,13 +114,8 @@ impl SecretsManager {
         let (read_fd, write_fd) = create_pipe()?;
 
         // Write secret to pipe and close the write end immediately
-        let written = unsafe {
-            libc::write(
-                write_fd,
-                value.as_ptr() as *const libc::c_void,
-                value.len(),
-            )
-        };
+        let written =
+            unsafe { libc::write(write_fd, value.as_ptr() as *const libc::c_void, value.len()) };
         unsafe { libc::close(write_fd) };
 
         if written < 0 {
@@ -155,9 +147,8 @@ impl SecretsManager {
 /// Returns `Ok(())` if permissions are correct; otherwise returns an `Err`
 /// with a human-readable warning message (non-fatal — caller decides).
 pub fn check_permissions(path: &Path) -> Result<(), String> {
-    let metadata = std::fs::metadata(path).map_err(|e| {
-        format!("Cannot read metadata for {}: {e}", path.display())
-    })?;
+    let metadata = std::fs::metadata(path)
+        .map_err(|e| format!("Cannot read metadata for {}: {e}", path.display()))?;
     let mode = metadata.permissions().mode() & 0o777;
     if mode != 0o600 {
         let actual = format!("{mode:04o}");
@@ -206,7 +197,6 @@ mod tests {
         f
     }
 
-    
     #[serial]
     #[test]
     fn test_load_secrets_from_valid_file() {
@@ -221,7 +211,6 @@ openai = "sk-openai-xyz"
         assert_eq!(mgr.get("openai"), Some("sk-openai-xyz"));
     }
 
-    
     #[serial]
     #[test]
     fn test_load_nonexistent_file_returns_empty() {
@@ -230,7 +219,6 @@ openai = "sk-openai-xyz"
         assert!(mgr.is_empty());
     }
 
-    
     #[serial]
     #[test]
     fn test_permissions_ok_0600() {
@@ -238,7 +226,6 @@ openai = "sk-openai-xyz"
         assert!(check_permissions(f.path()).is_ok());
     }
 
-    
     #[serial]
     #[test]
     fn test_permissions_warn_on_0644() {
@@ -251,7 +238,6 @@ openai = "sk-openai-xyz"
         assert!(msg.contains("0600"));
     }
 
-    
     #[serial]
     #[test]
     fn test_permissions_warn_on_0777() {
@@ -262,7 +248,6 @@ openai = "sk-openai-xyz"
         assert!(msg.contains("insecure permissions"));
     }
 
-    
     #[serial]
     #[test]
     fn test_fix_permissions_sets_0600() {
@@ -271,7 +256,6 @@ openai = "sk-openai-xyz"
         assert!(check_permissions(f.path()).is_ok());
     }
 
-    
     #[serial]
     #[test]
     fn test_scrub_removes_api_key_from_text() {
@@ -291,7 +275,6 @@ openai = "sk-openai-xyz"
         );
     }
 
-    
     #[serial]
     #[test]
     fn test_scrub_leaves_non_secret_text_unchanged() {
@@ -303,7 +286,6 @@ openai = "sk-openai-xyz"
         assert_eq!(mgr.scrub(text), text);
     }
 
-    
     #[serial]
     #[test]
     fn test_scrub_replaces_all_occurrences() {
@@ -316,7 +298,6 @@ openai = "sk-openai-xyz"
         assert_eq!(scrubbed, "use [REDACTED] here and [REDACTED] there");
     }
 
-    
     #[serial]
     #[test]
     fn test_create_secret_fd_injects_without_env() {
@@ -325,7 +306,9 @@ openai = "sk-openai-xyz"
         let mgr = SecretsManager::load(f.path()).unwrap();
 
         // Get the fd — this should succeed
-        let fd = mgr.create_secret_fd("test_key").expect("create_secret_fd should succeed");
+        let fd = mgr
+            .create_secret_fd("test_key")
+            .expect("create_secret_fd should succeed");
         assert!(fd > 0, "fd must be a valid descriptor");
 
         // Read back from the fd to verify the value was written
@@ -338,7 +321,6 @@ openai = "sk-openai-xyz"
         assert_eq!(read_value, "supersecret");
     }
 
-    
     #[serial]
     #[test]
     fn test_env_does_not_contain_secret_value() {
@@ -368,7 +350,6 @@ openai = "sk-openai-xyz"
         }
     }
 
-    
     #[serial]
     #[test]
     fn test_get_missing_key_returns_none() {
@@ -376,7 +357,6 @@ openai = "sk-openai-xyz"
         assert_eq!(mgr.get("missing"), None);
     }
 
-    
     #[serial]
     #[test]
     fn test_create_fd_missing_key_returns_error() {

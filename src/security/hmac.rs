@@ -30,7 +30,8 @@ pub enum HmacError {
 pub fn generate_key() -> Result<Vec<u8>, HmacError> {
     let rng = SystemRandom::new();
     let mut key_bytes = vec![0u8; 32];
-    rng.fill(&mut key_bytes).map_err(|_| HmacError::KeyGeneration)?;
+    rng.fill(&mut key_bytes)
+        .map_err(|_| HmacError::KeyGeneration)?;
     Ok(key_bytes)
 }
 
@@ -51,11 +52,7 @@ pub fn sign_message(key_bytes: &[u8], message: &[u8]) -> Result<Vec<u8>, HmacErr
 ///
 /// Returns `Ok(())` on success, `Err(HmacError::Verification)` on mismatch.
 /// Uses constant-time comparison to prevent timing attacks.
-pub fn verify_message(
-    key_bytes: &[u8],
-    message: &[u8],
-    tag: &[u8],
-) -> Result<(), HmacError> {
+pub fn verify_message(key_bytes: &[u8], message: &[u8], tag: &[u8]) -> Result<(), HmacError> {
     if key_bytes.len() < 32 {
         return Err(HmacError::InvalidKeyLength(key_bytes.len()));
     }

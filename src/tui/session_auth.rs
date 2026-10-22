@@ -70,7 +70,8 @@ pub fn sign_client(auth: &SessionAuth, msg: ClientMessage) -> Result<SignedClien
 pub fn verify_client(auth: &SessionAuth, frame: &SignedClientFrame) -> Result<ClientMessage> {
     let bytes = client_signable(&frame.msg)?;
     let tag = hex::decode(&frame.hmac).map_err(|e| anyhow!("invalid client hmac hex: {e}"))?;
-    hmac::verify_message(auth.key_bytes(), &bytes, &tag).map_err(|_| anyhow!("client HMAC verification failed"))?;
+    hmac::verify_message(auth.key_bytes(), &bytes, &tag)
+        .map_err(|_| anyhow!("client HMAC verification failed"))?;
     Ok(frame.msg.clone())
 }
 
@@ -86,7 +87,8 @@ pub fn sign_server(auth: &SessionAuth, msg: ServerMessage) -> Result<SignedServe
 pub fn verify_server(auth: &SessionAuth, frame: &SignedServerFrame) -> Result<ServerMessage> {
     let bytes = server_signable(&frame.msg)?;
     let tag = hex::decode(&frame.hmac).map_err(|e| anyhow!("invalid server hmac hex: {e}"))?;
-    hmac::verify_message(auth.key_bytes(), &bytes, &tag).map_err(|_| anyhow!("server HMAC verification failed"))?;
+    hmac::verify_message(auth.key_bytes(), &bytes, &tag)
+        .map_err(|_| anyhow!("server HMAC verification failed"))?;
     Ok(frame.msg.clone())
 }
 

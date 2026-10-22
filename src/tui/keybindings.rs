@@ -95,9 +95,7 @@ impl KeybindingState {
             KeyCode::Char('c') => Some(Action::NewWindow),
             KeyCode::Char('n') => Some(Action::NextWindow),
             KeyCode::Char('p') => Some(Action::PrevWindow),
-            KeyCode::Char(c @ '1'..='9') => {
-                Some(Action::SwitchWindow((c as u8 - b'0') as usize))
-            }
+            KeyCode::Char(c @ '1'..='9') => Some(Action::SwitchWindow((c as u8 - b'0') as usize)),
             // Focus cycle (tmux 'o')
             KeyCode::Char('o') => Some(Action::FocusNextPane),
             // Session management (Story 1.5)

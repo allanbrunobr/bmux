@@ -5,8 +5,8 @@ use std::time::Instant;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::{Child, ChildStdin, ChildStdout, Command};
 
-use async_trait::async_trait;
 use anyhow::Context;
+use async_trait::async_trait;
 
 use crate::agents::adapter::{AgentAdapter, AgentConfig, AgentOutput, AgentStatus, Task};
 
@@ -79,11 +79,14 @@ impl AgentAdapter for GeminiAdapter {
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped());
 
-        let mut child = cmd.spawn()
+        let mut child = cmd
+            .spawn()
             .with_context(|| format!("Failed to spawn gemini agent '{}'", self.id))?;
 
         self.stdin = child.stdin.take();
-        let stdout = child.stdout.take()
+        let stdout = child
+            .stdout
+            .take()
             .ok_or_else(|| anyhow::anyhow!("Failed to capture stdout"))?;
         self.stdout_reader = Some(BufReader::new(stdout));
         self.child = Some(child);
@@ -108,7 +111,9 @@ impl AgentAdapter for GeminiAdapter {
         let start = Instant::now();
         if let Some(reader) = &mut self.stdout_reader {
             let mut line = String::new();
-            reader.read_line(&mut line).await
+            reader
+                .read_line(&mut line)
+                .await
                 .context("Failed to read output from gemini agent")?;
 
             let tokens = (line.len() / 4).max(1) as u64;
@@ -123,7 +128,10 @@ impl AgentAdapter for GeminiAdapter {
                 duration_ms: start.elapsed().as_millis() as u64,
             })
         } else {
-            Err(anyhow::anyhow!("Gemini agent '{}' has no stdout reader", self.id))
+            Err(anyhow::anyhow!(
+                "Gemini agent '{}' has no stdout reader",
+                self.id
+            ))
         }
     }
 
@@ -133,7 +141,9 @@ impl AgentAdapter for GeminiAdapter {
 
     async fn kill(&mut self) -> anyhow::Result<()> {
         if let Some(mut child) = self.child.take() {
-            child.kill().await
+            child
+                .kill()
+                .await
                 .with_context(|| format!("Failed to kill gemini agent '{}'", self.id))?;
             child.wait().await.ok();
             tracing::info!(id = %self.id, "Gemini agent killed");

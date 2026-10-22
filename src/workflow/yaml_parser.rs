@@ -130,7 +130,10 @@ impl WorkflowParser {
                         dep: dep.clone(),
                     });
                 }
-                dependents.entry(dep.clone()).or_default().push(step.id.clone());
+                dependents
+                    .entry(dep.clone())
+                    .or_default()
+                    .push(step.id.clone());
             }
         }
 
@@ -160,7 +163,10 @@ impl WorkflowParser {
         let mut reverse: HashMap<&str, Vec<&str>> = HashMap::new();
         for step in steps {
             for dep in &step.depends_on {
-                reverse.entry(dep.as_str()).or_default().push(step.id.as_str());
+                reverse
+                    .entry(dep.as_str())
+                    .or_default()
+                    .push(step.id.as_str());
             }
         }
 
@@ -302,7 +308,13 @@ impl WorkflowParser {
             } else {
                 format!("after [{}]", step.depends_on.join(", "))
             };
-            lines.push(format!("  {}. {} [{}] {}", i + 1, step_id, step.agent, deps));
+            lines.push(format!(
+                "  {}. {} [{}] {}",
+                i + 1,
+                step_id,
+                step.agent,
+                deps
+            ));
         }
 
         // Estimated cost placeholder
@@ -325,7 +337,10 @@ impl WorkflowParser {
         for entry in std::fs::read_dir(path)? {
             let entry = entry?;
             let file_path = entry.path();
-            if file_path.extension().is_some_and(|e| e == "yaml" || e == "yml") {
+            if file_path
+                .extension()
+                .is_some_and(|e| e == "yaml" || e == "yml")
+            {
                 match self.parse_file(&file_path.to_string_lossy()) {
                     Ok(dag) => {
                         let agent_types: HashSet<_> = dag
@@ -458,14 +473,22 @@ steps:
     fn test_topo_order_design_before_implement() {
         let dag = parser().parse_str(VALID_YAML).unwrap();
         let design_pos = dag.topo_order.iter().position(|s| s == "design").unwrap();
-        let impl_pos = dag.topo_order.iter().position(|s| s == "implement").unwrap();
+        let impl_pos = dag
+            .topo_order
+            .iter()
+            .position(|s| s == "implement")
+            .unwrap();
         assert!(design_pos < impl_pos);
     }
 
     #[test]
     fn test_parallel_steps_both_after_implement() {
         let dag = parser().parse_str(VALID_YAML).unwrap();
-        let impl_pos = dag.topo_order.iter().position(|s| s == "implement").unwrap();
+        let impl_pos = dag
+            .topo_order
+            .iter()
+            .position(|s| s == "implement")
+            .unwrap();
         let test_pos = dag.topo_order.iter().position(|s| s == "test").unwrap();
         let doc_pos = dag.topo_order.iter().position(|s| s == "document").unwrap();
         assert!(impl_pos < test_pos);

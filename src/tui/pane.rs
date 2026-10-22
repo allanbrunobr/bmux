@@ -6,7 +6,10 @@ use std::os::unix::io::RawFd;
 type RawFd = i32;
 
 use super::pty_spawn;
-use super::{protocol::{CellData, PaneSnapshot}, scroll::ScrollState};
+use super::{
+    protocol::{CellData, PaneSnapshot},
+    scroll::ScrollState,
+};
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
@@ -16,8 +19,8 @@ use ratatui::{
 use std::{
     io::Write,
     sync::{
-        Arc, Mutex,
         atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
     },
 };
 
@@ -187,7 +190,10 @@ impl Pane {
 
     /// Create a renderable view for this pane.
     pub fn view(&self, focused: bool) -> PaneView<'_> {
-        PaneView { pane: self, focused }
+        PaneView {
+            pane: self,
+            focused,
+        }
     }
 
     /// Render screen content into an already-computed inner rect (no borders).
@@ -284,12 +290,7 @@ impl Pane {
                 break;
             }
             for (col, ch) in line.chars().take(inner.width as usize).enumerate() {
-                buf.set_string(
-                    inner.x + col as u16,
-                    y,
-                    ch.to_string(),
-                    Style::default(),
-                );
+                buf.set_string(inner.x + col as u16, y, ch.to_string(), Style::default());
             }
         }
     }
@@ -312,14 +313,30 @@ impl Pane {
                     let ch = contents.chars().next().unwrap_or(' ');
                     let (fg_r, fg_g, fg_b) = vt100_color_rgb(cell.fgcolor());
                     let (bg_r, bg_g, bg_b) = vt100_color_rgb(cell.bgcolor());
-                    row_cells.push(CellData { ch, fg_r, fg_g, fg_b, bg_r, bg_g, bg_b, bold: cell.bold() });
+                    row_cells.push(CellData {
+                        ch,
+                        fg_r,
+                        fg_g,
+                        fg_b,
+                        bg_r,
+                        bg_g,
+                        bg_b,
+                        bold: cell.bold(),
+                    });
                 } else {
                     row_cells.push(CellData::default());
                 }
             }
             cells.push(row_cells);
         }
-        PaneSnapshot { id: self.id, rows, cols, cells, cursor_row, cursor_col }
+        PaneSnapshot {
+            id: self.id,
+            rows,
+            cols,
+            cells,
+            cursor_row,
+            cursor_col,
+        }
     }
 
     fn snapshot_scroll(&self) -> PaneSnapshot {
@@ -333,7 +350,10 @@ impl Pane {
             let line = lines.get(r as usize).copied().unwrap_or("");
             for c in 0..cols {
                 let ch = line.chars().nth(c as usize).unwrap_or(' ');
-                row_cells.push(CellData { ch, ..CellData::default() });
+                row_cells.push(CellData {
+                    ch,
+                    ..CellData::default()
+                });
             }
             cells.push(row_cells);
         }
@@ -346,7 +366,7 @@ impl Pane {
             cursor_col: 0,
         }
     }
-}  // end impl Pane (snapshot)
+} // end impl Pane (snapshot)
 
 // ── Color conversion ──────────────────────────────────────────────────────────
 

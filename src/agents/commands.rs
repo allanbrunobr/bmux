@@ -52,21 +52,18 @@ pub async fn handle_spawn(
 
     let settings_config = if agent_type == "custom" {
         // Custom agent: look up by name in config
-        bmux_config
-            .agents
-            .get_custom(name)
-            .ok_or_else(|| anyhow::anyhow!(
+        bmux_config.agents.get_custom(name).ok_or_else(|| {
+            anyhow::anyhow!(
                 "Custom agent '{}' not found in config.toml. Add [agents.{}] section.",
-                name, name
-            ))?
+                name,
+                name
+            )
+        })?
     } else {
         // Built-in agent type: start with defaults, check user config overrides
         bmux_config
             .agents
-            .get(
-                agent_type,
-                bmux_config.security.allow_dangerous_permissions,
-            )
+            .get(agent_type, bmux_config.security.allow_dangerous_permissions)
             .unwrap_or_else(|| BmuxConfig::default_agent_config(agent_type))
     };
 
@@ -162,7 +159,12 @@ pub fn handle_status(registry: &AgentRegistry, name: &str) -> anyhow::Result<()>
         .get(name)
         .ok_or_else(|| anyhow::anyhow!("Agent '{}' not found", name))?;
 
-    println!("Agent: {} {} ({})", info.type_icon(), info.name, info.agent_type);
+    println!(
+        "Agent: {} {} ({})",
+        info.type_icon(),
+        info.name,
+        info.agent_type
+    );
     println!("Model:        {}", info.model);
     println!("Status:       {}", info.status.label());
     println!("Uptime:       {}s", info.uptime_seconds());

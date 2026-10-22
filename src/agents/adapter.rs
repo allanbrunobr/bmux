@@ -44,7 +44,6 @@ impl std::fmt::Display for AgentStatus {
     }
 }
 
-
 /// Configuration for spawning an agent process.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentConfig {
@@ -141,7 +140,10 @@ mod tests {
     fn test_agent_status_label() {
         assert_eq!(AgentStatus::Idle.label(), "idle");
         assert_eq!(AgentStatus::Working.label(), "working");
-        assert_eq!(AgentStatus::Error("boom".to_string()).label(), "error: boom");
+        assert_eq!(
+            AgentStatus::Error("boom".to_string()).label(),
+            "error: boom"
+        );
     }
 
     #[test]

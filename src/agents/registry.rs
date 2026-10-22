@@ -12,7 +12,9 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::agents::adapter::{AgentConfig, AgentStatus};
-use crate::tui::status_bar::{AgentStatusProvider, AgentStatusRow, AggregateStats as StatusAggregateStats};
+use crate::tui::status_bar::{
+    AgentStatusProvider, AgentStatusRow, AggregateStats as StatusAggregateStats,
+};
 
 /// Serializable snapshot of a single agent's state (for persistence).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -178,7 +180,9 @@ impl AgentRegistry {
 
     /// Record token usage and cost for an agent.
     pub fn record_usage(&mut self, name: &str, tokens: u64, cost: f64) -> anyhow::Result<()> {
-        let info = self.agents.get_mut(name)
+        let info = self
+            .agents
+            .get_mut(name)
             .ok_or_else(|| anyhow::anyhow!("Agent '{}' not found", name))?;
         info.tokens_used += tokens;
         info.cost_usd += cost;
@@ -188,7 +192,9 @@ impl AgentRegistry {
 
     /// Update an agent's status.
     pub fn set_status(&mut self, name: &str, status: AgentStatus) -> anyhow::Result<()> {
-        let info = self.agents.get_mut(name)
+        let info = self
+            .agents
+            .get_mut(name)
             .ok_or_else(|| anyhow::anyhow!("Agent '{}' not found", name))?;
         info.status = status;
         Ok(())
@@ -196,7 +202,9 @@ impl AgentRegistry {
 
     /// Record the last task description for an agent.
     pub fn set_last_task(&mut self, name: &str, task: impl Into<String>) -> anyhow::Result<()> {
-        let info = self.agents.get_mut(name)
+        let info = self
+            .agents
+            .get_mut(name)
             .ok_or_else(|| anyhow::anyhow!("Agent '{}' not found", name))?;
         info.last_task = Some(task.into());
         Ok(())
@@ -325,7 +333,11 @@ mod tests {
     #[test]
     fn test_register_and_list() {
         let mut registry = AgentRegistry::new();
-        registry.register("arch", "claude-code", make_config("claude", "claude-sonnet-4-5"));
+        registry.register(
+            "arch",
+            "claude-code",
+            make_config("claude", "claude-sonnet-4-5"),
+        );
         let list = registry.list();
         assert_eq!(list.len(), 1);
         assert_eq!(list[0].name, "arch");
@@ -344,7 +356,11 @@ mod tests {
     #[test]
     fn test_get_existing() {
         let mut registry = AgentRegistry::new();
-        registry.register("arch", "claude-code", make_config("claude", "claude-sonnet-4-5"));
+        registry.register(
+            "arch",
+            "claude-code",
+            make_config("claude", "claude-sonnet-4-5"),
+        );
         assert!(registry.get("arch").is_some());
     }
 
@@ -357,7 +373,11 @@ mod tests {
     #[test]
     fn test_remove_existing() {
         let mut registry = AgentRegistry::new();
-        registry.register("arch", "claude-code", make_config("claude", "claude-sonnet-4-5"));
+        registry.register(
+            "arch",
+            "claude-code",
+            make_config("claude", "claude-sonnet-4-5"),
+        );
         registry.remove("arch").unwrap();
         assert_eq!(registry.list().len(), 0);
     }
@@ -372,7 +392,11 @@ mod tests {
     #[test]
     fn test_record_usage_accumulates() {
         let mut registry = AgentRegistry::new();
-        registry.register("arch", "claude-code", make_config("claude", "claude-sonnet-4-5"));
+        registry.register(
+            "arch",
+            "claude-code",
+            make_config("claude", "claude-sonnet-4-5"),
+        );
         registry.record_usage("arch", 1000, 0.003).unwrap();
         registry.record_usage("arch", 500, 0.0015).unwrap();
         let info = registry.get("arch").unwrap();
@@ -384,7 +408,11 @@ mod tests {
     #[test]
     fn test_aggregate_stats_totals() {
         let mut registry = AgentRegistry::new();
-        registry.register("a", "claude-code", make_config("claude", "claude-sonnet-4-5"));
+        registry.register(
+            "a",
+            "claude-code",
+            make_config("claude", "claude-sonnet-4-5"),
+        );
         registry.register("b", "opencode", make_config("opencode", "gemini-2.5-pro"));
         registry.record_usage("a", 1000, 0.003).unwrap();
         registry.record_usage("b", 500, 0.0005).unwrap();
@@ -398,7 +426,11 @@ mod tests {
     #[test]
     fn test_aggregate_active_agents_count() {
         let mut registry = AgentRegistry::new();
-        registry.register("a", "claude-code", make_config("claude", "claude-sonnet-4-5"));
+        registry.register(
+            "a",
+            "claude-code",
+            make_config("claude", "claude-sonnet-4-5"),
+        );
         registry.register("b", "opencode", make_config("opencode", "gemini-2.5-pro"));
         registry.set_status("a", AgentStatus::Working).unwrap();
         let stats = registry.aggregate_stats();
@@ -408,7 +440,11 @@ mod tests {
     #[test]
     fn test_serialize_deserialize_roundtrip() {
         let mut registry = AgentRegistry::new();
-        registry.register("arch", "claude-code", make_config("claude", "claude-sonnet-4-5"));
+        registry.register(
+            "arch",
+            "claude-code",
+            make_config("claude", "claude-sonnet-4-5"),
+        );
         registry.record_usage("arch", 1000, 0.003).unwrap();
 
         let json = registry.to_json().unwrap();
@@ -425,7 +461,11 @@ mod tests {
         let path = dir.path().join("agents.json");
 
         let mut registry = AgentRegistry::new();
-        registry.register("arch", "claude-code", make_config("claude", "claude-sonnet-4-5"));
+        registry.register(
+            "arch",
+            "claude-code",
+            make_config("claude", "claude-sonnet-4-5"),
+        );
         registry.save_to_file(&path).unwrap();
 
         let loaded = AgentRegistry::load_from_file(&path).unwrap();
@@ -459,7 +499,11 @@ mod tests {
     #[test]
     fn test_status_provider_rows() {
         let mut registry = AgentRegistry::new();
-        registry.register("arch", "claude-code", make_config("claude", "claude-sonnet-4-5"));
+        registry.register(
+            "arch",
+            "claude-code",
+            make_config("claude", "claude-sonnet-4-5"),
+        );
         let rows = registry.agent_status_rows();
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].name, "arch");

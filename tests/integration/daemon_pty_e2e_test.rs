@@ -61,9 +61,14 @@ async fn integration_daemon_pty_spawn_echo_output() {
     let echo_cmd = b"echo BMUX_PTY_E2E_OK\n";
     writer
         .write_all(
-            encode_signed_client(&auth, ClientMessage::Input { data: echo_cmd.to_vec() })
-                .unwrap()
-                .as_bytes(),
+            encode_signed_client(
+                &auth,
+                ClientMessage::Input {
+                    data: echo_cmd.to_vec(),
+                },
+            )
+            .unwrap()
+            .as_bytes(),
         )
         .await
         .unwrap();

@@ -3,27 +3,29 @@ pub mod ipc_client;
 pub mod keybindings;
 pub mod layout;
 pub mod pane;
-pub mod pty_spawn;
 pub mod protocol;
-pub mod session_auth;
+pub mod pty_spawn;
 pub mod scroll;
 pub mod server;
 pub mod session;
+pub mod session_auth;
 pub mod status_bar;
 pub mod window;
 pub mod zoom;
 
 use anyhow::Result;
 use crossterm::{
-    event::{Event, MouseEvent, MouseEventKind, MouseButton, EnableMouseCapture, DisableMouseCapture},
+    event::{
+        DisableMouseCapture, EnableMouseCapture, Event, MouseButton, MouseEvent, MouseEventKind,
+    },
     execute,
-    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
+    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
-use ratatui::{Terminal, backend::CrosstermBackend};
+use ratatui::{backend::CrosstermBackend, Terminal};
 use std::time::Duration;
 use tokio::sync::mpsc;
 
-use keybindings::{Action, KeybindingState, key_event_to_bytes};
+use keybindings::{key_event_to_bytes, Action, KeybindingState};
 use layout::ResizeDir;
 use session::Session;
 
@@ -66,8 +68,7 @@ pub async fn run_local(session_name: &str) -> Result<()> {
     });
 
     // Render interval: up to 60 fps
-    let mut render_ticker =
-        tokio::time::interval(Duration::from_millis(16));
+    let mut render_ticker = tokio::time::interval(Duration::from_millis(16));
 
     while running {
         tokio::select! {
@@ -97,7 +98,11 @@ pub async fn run_local(session_name: &str) -> Result<()> {
 
     // Restore terminal
     disable_raw_mode()?;
-    execute!(terminal.backend_mut(), LeaveAlternateScreen, DisableMouseCapture)?;
+    execute!(
+        terminal.backend_mut(),
+        LeaveAlternateScreen,
+        DisableMouseCapture
+    )?;
     Ok(())
 }
 
@@ -153,8 +158,7 @@ fn handle_mouse(mouse: MouseEvent, session: &mut Session, drag: &mut DragState) 
         }
 
         // Drag to resize (Drag on iTerm2/Warp, Moved on Terminal.app)
-        MouseEventKind::Drag(MouseButton::Left)
-        | MouseEventKind::Moved => {
+        MouseEventKind::Drag(MouseButton::Left) | MouseEventKind::Moved => {
             if let Some(left_id) = drag.left_pane_id {
                 session.active_window().drag_border(left_id, mouse.column);
             }
