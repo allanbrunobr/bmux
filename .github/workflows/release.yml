@@ -1,9 +1,9 @@
 # .github/workflows/release.yml — Release pipeline
-# Story 7.1: Cargo Install & CI Build Pipeline
 #
 # Triggered when a semver tag (v*) is pushed.
-# Builds pre-compiled binaries for all 4 targets, uploads to GitHub Release,
-# and publishes SHA256 checksums alongside each binary.
+# Builds binaries for Linux and macOS (x86_64 and aarch64), creates a GitHub
+# Release and attaches the binaries with SHA256 checksums.
+# The crate is not published to crates.io: the name `bmux` belongs to another project.
 
 name: Release
 
@@ -134,20 +134,3 @@ jobs:
             dist/SHA256SUMS
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  # ─── Publish to crates.io ─────────────────────────────────────────────────
-  publish:
-    name: Publish to crates.io
-    needs: release
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Publish
-        run: cargo publish --token ${{ secrets.CARGO_REGISTRY_TOKEN }}
