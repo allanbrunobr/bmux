@@ -1,6 +1,6 @@
 // CustomAdapter — wraps any CLI binary as a BMUX-managed agent via config.toml.
 //
-// Story 2.5: Allows users to integrate proprietary or custom agents without
+// Allows users to integrate proprietary or custom agents without
 // modifying BMUX source code.
 // Type indicator: 🔌
 

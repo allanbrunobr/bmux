@@ -36,7 +36,9 @@ clap = { version = "4", features = ["derive"] }
 # Config
 toml = "0.8"
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+# float_roundtrip: frames are verified by re-serializing the decoded message,
+# so every f64 (agent costs) must parse back to the exact same value.
+serde_json = { version = "1", features = ["float_roundtrip"] }
 serde_yaml = "0.9"
 
 # Storage

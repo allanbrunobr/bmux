@@ -391,7 +391,7 @@ mod tests {
     }
 
     // ------------------------------------------------------------------
-    // Story 3.1 AC: socket created at correct path with 0600 permissions
+    // socket created at correct path with 0600 permissions
     // ------------------------------------------------------------------
 
     #[tokio::test]
@@ -425,7 +425,7 @@ mod tests {
     }
 
     // ------------------------------------------------------------------
-    // Story 3.1 AC: HMAC key generated at session init
+    // HMAC key generated at session init
     // ------------------------------------------------------------------
 
     #[test]
@@ -456,7 +456,7 @@ mod tests {
     }
 
     // ------------------------------------------------------------------
-    // Story 3.1 AC: HMAC-SHA256 verified on receipt; invalid rejected
+    // HMAC-SHA256 verified on receipt; invalid rejected
     // ------------------------------------------------------------------
 
     #[test]
@@ -539,7 +539,7 @@ mod tests {
     }
 
     // ------------------------------------------------------------------
-    // Story 3.1 AC: heartbeat routed → agent status updated
+    // heartbeat routed → agent status updated
     // ------------------------------------------------------------------
 
     #[tokio::test]
@@ -576,7 +576,7 @@ mod tests {
     }
 
     // ------------------------------------------------------------------
-    // Story 3.1 AC: invalid-HMAC messages rejected and logged (not routed)
+    // invalid-HMAC messages rejected and logged (not routed)
     // ------------------------------------------------------------------
 
     #[tokio::test]
@@ -610,7 +610,7 @@ mod tests {
     }
 
     // ------------------------------------------------------------------
-    // Story 3.1 AC: status message updates agent state map
+    // status message updates agent state map
     // ------------------------------------------------------------------
 
     #[tokio::test]
@@ -641,7 +641,7 @@ mod tests {
     }
 
     // ------------------------------------------------------------------
-    // Story 3.1 AC: valid messages are broadcast to subscribers
+    // valid messages are broadcast to subscribers
     // ------------------------------------------------------------------
 
     #[tokio::test]

@@ -16,12 +16,38 @@ pub struct BmuxConfig {
     pub default_shell: String,
     /// Enable mouse support
     pub mouse_support: bool,
+    /// `[tui]` section. Its values take precedence over the flat keys above.
+    pub tui: TuiConfig,
     /// Agent-related configuration
     pub agents: AgentsConfig,
     /// Security controls (sandbox, dangerous CLI flags)
     pub security: SecurityConfig,
     /// Audit logging toggle
     pub audit: AuditConfig,
+}
+
+/// `[tui]` section of config.toml.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct TuiConfig {
+    /// Shell for new panes. Falls back to the top-level `default_shell`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub default_shell: Option<String>,
+    /// Prefix key, e.g. `"ctrl-b"` or `"ctrl-a"`. Falls back to `prefix`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prefix_key: Option<String>,
+    /// Show the status bar at the bottom of the screen.
+    pub status_bar: bool,
+}
+
+impl Default for TuiConfig {
+    fn default() -> Self {
+        Self {
+            default_shell: None,
+            prefix_key: None,
+            status_bar: true,
+        }
+    }
 }
 
 impl Default for BmuxConfig {
@@ -31,6 +57,7 @@ impl Default for BmuxConfig {
             history_limit: 10_000,
             default_shell: std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string()),
             mouse_support: false,
+            tui: TuiConfig::default(),
             agents: AgentsConfig::default(),
             security: SecurityConfig::default(),
             audit: AuditConfig::default(),
@@ -77,6 +104,12 @@ impl BmuxConfig {
             .map_err(|e| anyhow::anyhow!("Cannot read {}: {}", path.display(), e))?;
         let config: BmuxConfig =
             toml::from_str(&content).map_err(|e| anyhow::anyhow!("TOML parse error: {e}"))?;
+        if crate::tui::keybindings::PrefixKey::parse(config.prefix_key()).is_none() {
+            anyhow::bail!(
+                "invalid prefix key '{}': use ctrl-<letter> or ctrl-space",
+                config.prefix_key()
+            );
+        }
         Ok(config)
     }
 
@@ -100,10 +133,8 @@ impl BmuxConfig {
 
     /// Load config from the default path (~/.config/bmux/config.toml).
     pub fn load() -> anyhow::Result<Self> {
-        let path = dirs::config_dir()
-            .unwrap_or_default()
-            .join("bmux")
-            .join("config.toml");
+        // Same path as `bmux config show/validate/reload` and `Ctrl-b r`.
+        let path = crate::config::default_config_path();
         if path.exists() {
             Self::load_from_path(&path)
         } else {
@@ -129,15 +160,36 @@ impl BmuxConfig {
     }
 
     /// Format config as a human-readable string for `bmux config show`.
+    /// Effective prefix key: `[tui] prefix_key`, else top-level `prefix`.
+    pub fn prefix_key(&self) -> &str {
+        self.tui.prefix_key.as_deref().unwrap_or(&self.prefix)
+    }
+
+    /// Effective shell for new panes: `[tui] default_shell`, else `default_shell`.
+    pub fn shell(&self) -> &str {
+        self.tui
+            .default_shell
+            .as_deref()
+            .unwrap_or(&self.default_shell)
+    }
+
+    /// Agent type used by `bmux agent spawn` when no type is given.
+    pub fn default_agent_type(&self) -> &str {
+        self.agents.default_type.as_deref().unwrap_or("claude-code")
+    }
+
     pub fn display(&self) -> String {
         format!(
-            "prefix        = {}\nhistory_limit = {}\ndefault_shell = {}\nmouse_support = {}\n[agents]\n  claude_code.binary = {}\n  opencode.binary    = {}",
-            self.prefix,
-            self.history_limit,
-            self.default_shell,
-            self.mouse_support,
+            "[tui]\n  prefix_key    = {}\n  default_shell = {}\n  status_bar    = {}\n[agents]\n  default_type       = {}\n  claude_code.binary = {}\n  opencode.binary    = {}\n  pi.binary          = {}\n[security]\n  sandbox = {}\n[audit]\n  enabled = {}",
+            self.prefix_key(),
+            self.shell(),
+            self.tui.status_bar,
+            self.default_agent_type(),
             self.agents.claude_code.binary,
             self.agents.opencode.binary,
+            self.agents.pi.binary,
+            self.security.sandbox,
+            self.audit.enabled,
         )
     }
 }
@@ -146,6 +198,9 @@ impl BmuxConfig {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AgentsConfig {
+    /// Agent type for `bmux agent spawn` without a type (default: claude-code).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub default_type: Option<String>,
     pub claude_code: AgentBinaryConfig,
     pub opencode: AgentBinaryConfig,
     pub pi: AgentBinaryConfig,
@@ -157,6 +212,7 @@ pub struct AgentsConfig {
 impl Default for AgentsConfig {
     fn default() -> Self {
         Self {
+            default_type: None,
             claude_code: AgentBinaryConfig {
                 binary: "claude".to_string(),
             },
@@ -239,6 +295,57 @@ mod tests {
     use std::io::Write;
     use tempfile::NamedTempFile;
 
+    #[test]
+    fn rejects_invalid_prefix_key() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(&path, "[tui]\nprefix_key = \"ctrl-1\"\n").unwrap();
+        assert!(BmuxConfig::load_from_path(&path).is_err());
+        std::fs::write(&path, "[tui]\nprefix_key = \"ctrl-a\"\n").unwrap();
+        assert_eq!(
+            BmuxConfig::load_from_path(&path).unwrap().prefix_key(),
+            "ctrl-a"
+        );
+    }
+
+    #[test]
+    fn tui_section_overrides_flat_keys() {
+        let cfg: BmuxConfig = toml::from_str(
+            r#"
+prefix = "ctrl-b"
+default_shell = "/bin/bash"
+
+[tui]
+default_shell = "/bin/zsh"
+prefix_key    = "ctrl-a"
+status_bar    = false
+
+[agents]
+default_type = "claude"
+
+[agents.reviewer]
+binary = "my-agent"
+"#,
+        )
+        .unwrap();
+        assert_eq!(cfg.prefix_key(), "ctrl-a");
+        assert_eq!(cfg.shell(), "/bin/zsh");
+        assert!(!cfg.tui.status_bar);
+        assert_eq!(cfg.default_agent_type(), "claude");
+        assert!(cfg.agents.get_custom("reviewer").is_some());
+        assert!(cfg.agents.get_custom("default_type").is_none());
+    }
+
+    #[test]
+    fn flat_keys_still_work_without_tui_section() {
+        let cfg: BmuxConfig =
+            toml::from_str("prefix = \"ctrl-a\"\ndefault_shell = \"/bin/fish\"\n").unwrap();
+        assert_eq!(cfg.prefix_key(), "ctrl-a");
+        assert_eq!(cfg.shell(), "/bin/fish");
+        assert!(cfg.tui.status_bar);
+        assert_eq!(cfg.default_agent_type(), "claude-code");
+    }
+
     fn write_toml(content: &str) -> NamedTempFile {
         let mut f = NamedTempFile::new().unwrap();
         f.write_all(content.as_bytes()).unwrap();
@@ -320,10 +427,10 @@ mouse_support = true
     fn display_contains_key_fields() {
         let cfg = BmuxConfig::default();
         let display = cfg.display();
-        assert!(display.contains("prefix"));
-        assert!(display.contains("history_limit"));
+        assert!(display.contains("prefix_key"));
         assert!(display.contains("default_shell"));
-        assert!(display.contains("mouse_support"));
+        assert!(display.contains("status_bar"));
+        assert!(display.contains("default_type"));
     }
 
     #[test]

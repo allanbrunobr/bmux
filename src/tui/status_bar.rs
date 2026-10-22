@@ -6,6 +6,7 @@ use ratatui::{
     widgets::Widget,
 };
 
+use crate::tui::protocol::AgentBadge;
 use crate::tui::scroll::SCROLL_MODE_INDICATOR;
 use crate::tui::zoom::ZoomState;
 
@@ -34,8 +35,6 @@ impl StatusMessage {
 }
 
 /// State passed to `StatusBar` for rendering.
-///
-/// `wt3` will extend this with agent info at merge time.
 #[derive(Debug, Clone)]
 pub struct StatusBarState {
     /// Current session name
@@ -50,6 +49,8 @@ pub struct StatusBarState {
     pub zoom: ZoomState,
     /// Transient status message
     pub message: StatusMessage,
+    /// Agents in the session (daemon mode only).
+    pub agents: Vec<AgentBadge>,
 }
 
 impl Default for StatusBarState {
@@ -61,6 +62,7 @@ impl Default for StatusBarState {
             in_scroll_mode: false,
             zoom: ZoomState::new(),
             message: StatusMessage::None,
+            agents: Vec::new(),
         }
     }
 }
@@ -80,8 +82,7 @@ impl StatusBarState {
 /// - Session name (left)
 /// - Window list (centre)
 /// - Zoom / scroll indicators and status messages (right)
-///
-/// `wt3` extends this with per-agent status and cost info.
+/// - Agents with their status and estimated cost, plus the session total (far right)
 pub struct StatusBar<'a> {
     state: &'a StatusBarState,
 }
@@ -162,6 +163,93 @@ impl<'a> StatusBar<'a> {
     }
 }
 
+/// Per-agent badges: `● dev $0.0123`.
+fn agent_spans(agents: &[AgentBadge]) -> Vec<Span<'static>> {
+    let mut spans = Vec::new();
+    for agent in agents {
+        let (indicator, color) = status_indicator(&agent.status);
+        spans.push(Span::styled(
+            format!(" {indicator}"),
+            Style::default().fg(color).bg(Color::DarkGray),
+        ));
+        let mut text = format!(" {}", agent.name);
+        if agent.cost_tracked {
+            text.push(' ');
+            text.push_str(&format_cost(agent.cost_usd));
+        }
+        text.push(' ');
+        spans.push(Span::styled(
+            text,
+            Style::default().fg(Color::White).bg(Color::DarkGray),
+        ));
+    }
+    spans
+}
+
+/// Session total for agents whose cost is tracked: `Σ $0.05`.
+fn total_spans(agents: &[AgentBadge]) -> Vec<Span<'static>> {
+    if !agents.iter().any(|a| a.cost_tracked) {
+        return Vec::new();
+    }
+    let total: f64 = agents
+        .iter()
+        .filter(|a| a.cost_tracked)
+        .map(|a| a.cost_usd)
+        .sum();
+    vec![Span::styled(
+        format!(" Σ {} ", format_cost(total)),
+        Style::default()
+            .fg(Color::Black)
+            .bg(Color::Green)
+            .add_modifier(Modifier::BOLD),
+    )]
+}
+
+/// Draw agent badges right-aligned on the status bar row. `left_width` is
+/// the width already used on the left. The per-agent badges are dropped
+/// first, then the total, when they do not fit.
+pub fn render_agent_badges(agents: &[AgentBadge], left_width: usize, area: Rect, buf: &mut Buffer) {
+    if agents.is_empty() || area.height == 0 {
+        return;
+    }
+    let used = left_width + 1;
+    let width = area.width as usize;
+    let mut right = agent_spans(agents);
+    right.extend(total_spans(agents));
+    if used + spans_width(&right) > width {
+        right = total_spans(agents);
+    }
+    let right_width = spans_width(&right);
+    if right_width == 0 || used + right_width > width {
+        return;
+    }
+    let x = area.left() + (width - right_width) as u16;
+    buf.set_line(x, area.top(), &Line::from(right), right_width as u16);
+}
+
+/// Status dot and colour for an agent status label.
+fn status_indicator(status: &str) -> (&'static str, Color) {
+    match status {
+        "working" => ("●", Color::LightGreen),
+        "idle" => ("○", Color::Gray),
+        "waiting" => ("◐", Color::Yellow),
+        _ => ("✗", Color::LightRed),
+    }
+}
+
+/// `$0.0042` below one cent, `$1.23` above.
+pub fn format_cost(usd: f64) -> String {
+    if usd > 0.0 && usd < 0.01 {
+        format!("${usd:.4}")
+    } else {
+        format!("${usd:.2}")
+    }
+}
+
+pub fn spans_width(spans: &[Span]) -> usize {
+    spans.iter().map(|s| s.width()).sum()
+}
+
 impl Widget for StatusBar<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
         // Fill the background
@@ -174,8 +262,10 @@ impl Widget for StatusBar<'_> {
         spans.extend(self.window_spans());
         spans.extend(self.right_spans());
 
+        let left_width = spans_width(&spans);
         let line = Line::from(spans);
         buf.set_line(area.left(), area.top(), &line, area.width);
+        render_agent_badges(&self.state.agents, left_width, area, buf);
     }
 }
 
@@ -305,6 +395,54 @@ mod tests {
         let t = m.text().unwrap();
         assert!(t.starts_with("Config error:"));
         assert!(t.contains("invalid key"));
+    }
+
+    fn badge(name: &str, status: &str, cost: f64, tracked: bool) -> AgentBadge {
+        AgentBadge {
+            name: name.to_string(),
+            agent_type: "claude-code".to_string(),
+            model: "claude-sonnet-4-5".to_string(),
+            status: status.to_string(),
+            tokens: 1000,
+            cost_usd: cost,
+            cost_tracked: tracked,
+            pane_id: Some(1),
+        }
+    }
+
+    #[test]
+    fn shows_agent_cost_and_total() {
+        let mut state = StatusBarState::new("demo");
+        state.agents = vec![
+            badge("dev", "working", 0.0042, true),
+            badge("rev", "idle", 0.25, true),
+            badge("sh", "idle", 0.0, false),
+        ];
+        let row = render_status_bar(&state, 100);
+        assert!(row.contains("● dev $0.0042"), "row: {row}");
+        assert!(row.contains("○ rev $0.25"), "row: {row}");
+        assert!(row.contains("○ sh "), "row: {row}");
+        assert!(row.contains("Σ $0.25"), "row: {row}");
+    }
+
+    #[test]
+    fn narrow_bar_keeps_only_the_total() {
+        let mut state = StatusBarState::new("demo");
+        state.agents = vec![
+            badge("developer", "working", 1.5, true),
+            badge("reviewer", "idle", 0.5, true),
+        ];
+        let row = render_status_bar(&state, 36);
+        assert!(row.contains("Σ $2.00"), "row: {row}");
+        assert!(!row.contains("developer"), "row: {row}");
+    }
+
+    #[test]
+    fn no_total_without_tracked_agents() {
+        let mut state = StatusBarState::new("demo");
+        state.agents = vec![badge("sh", "idle", 0.0, false)];
+        let row = render_status_bar(&state, 80);
+        assert!(!row.contains('Σ'), "row: {row}");
     }
 
     #[test]

@@ -60,7 +60,7 @@ impl SharedContextStore {
         Self { inner }
     }
 
-    // ─── Agent output helpers (Story 4.2) ────────────────────────────────────
+    // ─── Agent output helpers ────────────────────────────────────
 
     /// Store an agent's last output at `agent:{id}:last_output` with TTL of 1 hour.
     pub fn store_agent_output(
@@ -119,7 +119,7 @@ impl SharedContextStore {
         self.inner.delete(key)
     }
 
-    // ─── Session lifecycle (Story 4.3) ───────────────────────────────────────
+    // ─── Session lifecycle ───────────────────────────────────────
 
     /// Remove all context entries for this session (called on `bmux kill -s`).
     pub fn cleanup_session(&self) -> Result<usize, ContextStoreError> {
@@ -131,7 +131,7 @@ impl SharedContextStore {
         self.inner.cleanup_expired_all()
     }
 
-    // ─── IPC message dispatch (Story 4.2) ────────────────────────────────────
+    // ─── IPC message dispatch ────────────────────────────────────
 
     /// Handle a context request arriving via IPC and return a response.
     pub fn handle_request(&self, req: ContextRequest) -> ContextResponse {
@@ -160,7 +160,7 @@ impl SharedContextStore {
     }
 }
 
-/// Background TTL cleanup task (Story 4.3).
+/// Background TTL cleanup task.
 /// Sweeps expired entries every 60 seconds.
 pub async fn run_cleanup_task(store: SharedContextStore) {
     use tokio::time::{interval, Duration};
@@ -184,7 +184,7 @@ mod tests {
         (store, dir)
     }
 
-    // ── Story 4.2: agent output storage ──────────────────────────────────────
+    // ── agent output storage ──────────────────────────────────────
 
     #[test]
     fn test_store_and_read_agent_output() {

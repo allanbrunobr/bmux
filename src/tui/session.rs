@@ -24,7 +24,15 @@ pub struct Session {
     created_at: DateTime<Utc>,
     next_window_id: usize,
     status_flash: Option<StatusMessage>,
+    status_flash_at: Option<std::time::Instant>,
+    /// Rows reserved for the status bar: 1, or 0 when it is hidden.
+    status_rows: u16,
+    term_rows: u16,
+    term_cols: u16,
 }
+
+/// How long a status-bar message stays visible.
+pub const STATUS_FLASH_TTL: std::time::Duration = std::time::Duration::from_secs(4);
 
 impl Session {
     pub fn new(name: &str, rows: u16, cols: u16) -> Result<Self> {
@@ -38,15 +46,64 @@ impl Session {
             created_at: Utc::now(),
             next_window_id: 1,
             status_flash: None,
+            status_flash_at: None,
+            status_rows: 1,
+            term_rows: rows,
+            term_cols: cols,
         })
     }
 
     pub fn set_status_flash(&mut self, message: StatusMessage) {
         self.status_flash = Some(message);
+        self.status_flash_at = Some(std::time::Instant::now());
     }
 
     pub fn take_status_flash(&mut self) -> Option<StatusMessage> {
+        self.status_flash_at = None;
         self.status_flash.take()
+    }
+
+    /// Drop the status message once it is older than [`STATUS_FLASH_TTL`].
+    /// Returns `true` when a message was cleared.
+    pub fn expire_status_flash(&mut self) -> bool {
+        match self.status_flash_at {
+            Some(at) if at.elapsed() >= STATUS_FLASH_TTL => {
+                self.status_flash = None;
+                self.status_flash_at = None;
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// Show or hide the status bar (`[tui] status_bar`). Panes are resized
+    /// to use the freed row.
+    pub fn set_status_bar_visible(&mut self, visible: bool) -> Result<()> {
+        let rows = u16::from(visible);
+        if rows == self.status_rows {
+            return Ok(());
+        }
+        self.status_rows = rows;
+        self.resize(self.term_rows, self.term_cols)
+    }
+
+    pub fn status_bar_visible(&self) -> bool {
+        self.status_rows > 0
+    }
+
+    /// Name of the active window.
+    pub fn active_window_name(&self) -> &str {
+        &self.windows[self.active_window].name
+    }
+
+    /// Rename the active window (`Ctrl-b ,`). Empty names are ignored.
+    pub fn rename_active_window(&mut self, name: &str) {
+        let name = name.trim();
+        if name.is_empty() {
+            return;
+        }
+        let name: String = name.chars().filter(|c| !c.is_control()).take(32).collect();
+        self.windows[self.active_window].name = name;
     }
 
     pub fn toggle_zoom(&mut self) {
@@ -124,13 +181,13 @@ impl Session {
         Ok((pane_id, pid))
     }
 
-    // ── Story 1.4: Window management ─────────────────────────────────────────
+    // ── Window management ─────────────────────────────────────────
 
     /// Create a new window and switch focus to it.
     pub fn create_window(&mut self, rows: u16, cols: u16) -> Result<()> {
         let id = self.next_window_id;
         self.next_window_id += 1;
-        let content_rows = rows.saturating_sub(1).max(1);
+        let content_rows = rows.saturating_sub(self.status_rows).max(1);
         let window = Window::new(id, content_rows, cols)?;
         self.windows.push(window);
         self.active_window = self.windows.len() - 1;
@@ -177,7 +234,9 @@ impl Session {
     // ── Resize ────────────────────────────────────────────────────────────────
 
     pub fn resize(&mut self, rows: u16, cols: u16) -> Result<()> {
-        let content_rows = rows.saturating_sub(1).max(1);
+        self.term_rows = rows;
+        self.term_cols = cols;
+        let content_rows = rows.saturating_sub(self.status_rows).max(1);
         for w in &mut self.windows {
             w.resize(content_rows, cols)?;
         }
@@ -192,6 +251,8 @@ impl Session {
             active_window: self.active_window,
             windows: self.windows.iter().map(|w| w.snapshot()).collect(),
             status_message,
+            agents: Vec::new(),
+            status_bar: self.status_bar_visible(),
         }
     }
 
@@ -209,7 +270,7 @@ impl Session {
         // Split vertically: content area + 1-row status bar
         let chunks = RatatuiLayout::default()
             .direction(Direction::Vertical)
-            .constraints([Constraint::Min(1), Constraint::Length(1)])
+            .constraints([Constraint::Min(1), Constraint::Length(self.status_rows)])
             .split(total);
 
         let content_area = chunks[0];
@@ -218,6 +279,9 @@ impl Session {
         // Render active window
         let buf = frame.buffer_mut();
         self.windows[self.active_window].render(buf, content_area);
+        if self.status_rows == 0 {
+            return;
+        }
 
         // Render status bar
         let active_win = &self.windows[self.active_window];
@@ -228,6 +292,7 @@ impl Session {
             in_scroll_mode: active_win.scroll_active(),
             zoom: active_win.zoom_state(),
             message: self.status_flash.clone().unwrap_or(StatusMessage::None),
+            agents: Vec::new(),
         };
         frame.render_widget(StatusBar::new(&status_state), status_area);
     }

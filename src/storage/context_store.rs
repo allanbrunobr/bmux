@@ -176,13 +176,13 @@ impl ContextStore {
         Ok(())
     }
 
-    /// Dump all non-expired entries as a JSON string (Story 4.4).
+    /// Dump all non-expired entries as a JSON string.
     pub fn dump_json(&self) -> Result<String> {
         let entries = self.dump()?;
         Ok(serde_json::to_string_pretty(&entries)?)
     }
 
-    /// Dump all non-expired entries for this session (Story 4.4).
+    /// Dump all non-expired entries for this session.
     pub fn dump(&self) -> Result<Vec<ContextEntry>> {
         let now = Self::now_secs();
         let mut result = Vec::new();
@@ -206,7 +206,7 @@ impl ContextStore {
         Ok(result)
     }
 
-    /// Remove all context entries for this session (called on session kill — Story 4.3).
+    /// Remove all context entries for this session (called on session kill).
     pub fn cleanup_session(&self) -> Result<usize> {
         let mut keys_to_remove: Vec<Vec<u8>> = Vec::new();
 
@@ -223,7 +223,7 @@ impl ContextStore {
     }
 
     /// Sweep and remove expired entries across ALL sessions in this database.
-    /// Called by background cleanup task every 60s (Story 4.3).
+    /// Called by background cleanup task every 60s.
     pub fn cleanup_expired_all(&self) -> Result<usize> {
         let now = Self::now_secs();
         let mut keys_to_remove: Vec<Vec<u8>> = Vec::new();
@@ -263,7 +263,7 @@ mod tests {
         (store, dir)
     }
 
-    // ── Story 4.1: basic set/get ──────────────────────────────────────────────
+    // ── basic set/get ──────────────────────────────────────────────
 
     #[serial]
     #[test]
@@ -344,7 +344,7 @@ mod tests {
         assert_eq!(store.get("to-delete").unwrap(), None);
     }
 
-    // ── Story 4.3: TTL expiry ────────────────────────────────────────────────
+    // ── TTL expiry ────────────────────────────────────────────────
 
     #[serial]
     #[test]
@@ -438,7 +438,7 @@ mod tests {
         assert!(store.list().unwrap().is_empty());
     }
 
-    // ── Story 4.4: JSON dump ─────────────────────────────────────────────────
+    // ── JSON dump ─────────────────────────────────────────────────
 
     #[serial]
     #[test]

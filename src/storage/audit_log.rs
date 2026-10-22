@@ -1,5 +1,5 @@
 // src/storage/audit_log.rs — Structured audit logging (JSONL)
-// Story 6.3: Audit Logging
+// Audit Logging
 //
 // Writes one JSON object per line to:
 //   ~/.local/share/bmux/audit/YYYY-MM-DD.jsonl
@@ -29,7 +29,7 @@ pub enum AuditError {
 
 // ─── Event types ───────────────────────────────────────────────────────────────
 
-/// All auditable event types (FR-SEC-03 + Story 6.3 AC).
+/// All auditable event types (FR-SEC-03).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum EventType {
@@ -235,7 +235,7 @@ pub fn purge_all_data() {
         errors.push(format!("audit logs: {e}"));
     }
 
-    // Context store (wt6's territory; we attempt best-effort deletion)
+    // Context store (we attempt best-effort deletion)
     let context_dir = base.join("context");
     if context_dir.exists() {
         if let Err(e) = fs::remove_dir_all(&context_dir) {
@@ -243,7 +243,7 @@ pub fn purge_all_data() {
         }
     }
 
-    // Session store (wt6's territory; best-effort)
+    // Session store (best-effort)
     let sessions_dir = base.join("sessions");
     if sessions_dir.exists() {
         if let Err(e) = fs::remove_dir_all(&sessions_dir) {

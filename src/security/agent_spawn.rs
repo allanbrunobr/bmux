@@ -63,7 +63,8 @@ fn attach_secret_fd(
     cmd: &mut CommandBuilder,
     inject_fds: &mut Vec<RawFd>,
 ) {
-    const PRIMARY_KEYS: &[&str] = &["anthropics", "openai", "google"];
+    // `anthropic` is the documented name; `anthropics` is accepted for older files.
+    const PRIMARY_KEYS: &[&str] = &["anthropic", "anthropics", "openai", "google"];
     for key in PRIMARY_KEYS {
         if let Ok(fd) = envelope.secrets.create_secret_fd(key) {
             let slot = 3 + inject_fds.len() as RawFd;

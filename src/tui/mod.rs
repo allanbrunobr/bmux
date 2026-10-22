@@ -2,6 +2,7 @@ pub mod client;
 pub mod ipc_client;
 pub mod keybindings;
 pub mod layout;
+pub mod overlay;
 pub mod pane;
 pub mod protocol;
 pub mod pty_spawn;
@@ -21,13 +22,16 @@ use crossterm::{
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
-use ratatui::{backend::CrosstermBackend, Terminal};
+use ratatui::{backend::CrosstermBackend, layout::Rect, Terminal};
 use std::time::Duration;
 use tokio::sync::mpsc;
 
+use crate::config::settings::BmuxConfig;
 use keybindings::{key_event_to_bytes, Action, KeybindingState};
 use layout::ResizeDir;
+use overlay::{render_help, Prompt, PromptKind, PromptOutcome};
 use session::Session;
+use status_bar::StatusMessage;
 
 /// Tracks mouse drag state for pane border resizing.
 struct DragState {
@@ -35,9 +39,26 @@ struct DragState {
     left_pane_id: Option<usize>,
 }
 
+/// State of the local TUI loop.
+struct LocalUi {
+    keybindings: KeybindingState,
+    drag: DragState,
+    prompt: Option<Prompt>,
+    help: bool,
+    running: bool,
+    rows: u16,
+    cols: u16,
+}
+
+/// Apply the `[tui]` settings to a local session.
+fn apply_local_config(session: &mut Session, cfg: &BmuxConfig) -> Result<()> {
+    pane::set_default_shell(Some(cfg.shell().to_string()));
+    session.set_status_bar_visible(cfg.tui.status_bar)
+}
+
 /// Run the TUI in local (single-process) mode.
 ///
-/// Used when `bmux` is invoked with no arguments (Story 1.1).
+/// Used when `bmux` is invoked with no arguments.
 /// All windows and panes live in this process — no daemon needed.
 pub async fn run_local(session_name: &str) -> Result<()> {
     let (cols, rows) = crossterm::terminal::size()?;
@@ -50,14 +71,29 @@ pub async fn run_local(session_name: &str) -> Result<()> {
     let backend = CrosstermBackend::new(std::io::stdout());
     let mut terminal = Terminal::new(backend)?;
 
+    // Apply the configured shell before the first pane is created.
+    let config = BmuxConfig::load().unwrap_or_default();
+    pane::set_default_shell(Some(config.shell().to_string()));
     let mut session = Session::new(session_name, rows, cols)?;
-    let mut keybindings = KeybindingState::new();
-    let mut drag = DragState { left_pane_id: None };
-    let mut running = true;
+    apply_local_config(&mut session, &config)?;
+    let mut ui = LocalUi {
+        keybindings: KeybindingState::from_config(config.prefix_key()),
+        drag: DragState { left_pane_id: None },
+        prompt: None,
+        help: false,
+        running: true,
+        rows,
+        cols,
+    };
 
     // Async keyboard event channel (spawn_blocking for crossterm reads)
     let (key_tx, mut key_rx) = mpsc::unbounded_channel::<Event>();
+    // The loop ends when the receiver is dropped, so the runtime can shut
+    // down after detach instead of waiting for this thread forever.
     tokio::task::spawn_blocking(move || loop {
+        if key_tx.is_closed() {
+            break;
+        }
         if crossterm::event::poll(Duration::from_millis(50)).unwrap_or(false) {
             if let Ok(ev) = crossterm::event::read() {
                 if key_tx.send(ev).is_err() {
@@ -70,11 +106,22 @@ pub async fn run_local(session_name: &str) -> Result<()> {
     // Render interval: up to 60 fps
     let mut render_ticker = tokio::time::interval(Duration::from_millis(16));
 
-    while running {
+    while ui.running {
         tokio::select! {
             _ = render_ticker.tick() => {
-                // Only re-draw when PTY has new output or always at 60fps
-                terminal.draw(|f| session.render(f))?;
+                session.expire_status_flash();
+                let prefix_label = ui.keybindings.prefix().label();
+                terminal.draw(|f| {
+                    session.render(f);
+                    let area = f.area();
+                    if let Some(prompt) = &ui.prompt {
+                        let row = Rect::new(area.x, area.bottom().saturating_sub(1), area.width, 1);
+                        prompt.render(row, f.buffer_mut());
+                    }
+                    if ui.help {
+                        render_help(area, f.buffer_mut(), &prefix_label);
+                    }
+                })?;
             }
 
             maybe_event = async {
@@ -82,15 +129,7 @@ pub async fn run_local(session_name: &str) -> Result<()> {
                 key_rx.recv().await
             } => {
                 if let Some(ev) = maybe_event {
-                    handle_event(
-                        ev,
-                        &mut session,
-                        &mut keybindings,
-                        &mut drag,
-                        &mut running,
-                        rows,
-                        cols,
-                    )?;
+                    handle_event(ev, &mut session, &mut ui)?;
                 }
             }
         }
@@ -106,20 +145,25 @@ pub async fn run_local(session_name: &str) -> Result<()> {
     Ok(())
 }
 
-fn handle_event(
-    event: Event,
-    session: &mut Session,
-    keybindings: &mut KeybindingState,
-    drag: &mut DragState,
-    running: &mut bool,
-    rows: u16,
-    cols: u16,
-) -> Result<()> {
+fn handle_event(event: Event, session: &mut Session, ui: &mut LocalUi) -> Result<()> {
     match event {
+        Event::Key(_) if ui.help => ui.help = false,
+        Event::Key(key) if ui.prompt.is_some() => {
+            let prompt = ui.prompt.as_mut().expect("prompt is open");
+            match prompt.handle_key(key) {
+                PromptOutcome::Pending => {}
+                PromptOutcome::Cancelled => ui.prompt = None,
+                PromptOutcome::Submitted(text) => {
+                    if ui.prompt.take().map(|p| p.kind) == Some(PromptKind::RenameWindow) {
+                        session.rename_active_window(&text);
+                    }
+                }
+            }
+        }
         Event::Key(key) => {
-            let (action, pass_to_pty) = keybindings.process(key);
+            let (action, pass_to_pty) = ui.keybindings.process(key);
             if let Some(act) = action {
-                handle_action(act, session, running, rows, cols)?;
+                handle_action(act, session, ui)?;
             } else if pass_to_pty {
                 let bytes = key_event_to_bytes(key);
                 if !bytes.is_empty() && !session.handle_scroll_input(&bytes) {
@@ -128,9 +172,11 @@ fn handle_event(
             }
         }
         Event::Mouse(mouse) => {
-            handle_mouse(mouse, session, drag);
+            handle_mouse(mouse, session, &mut ui.drag);
         }
         Event::Resize(new_cols, new_rows) => {
+            ui.rows = new_rows;
+            ui.cols = new_cols;
             session.resize(new_rows, new_cols)?;
         }
         _ => {}
@@ -173,15 +219,9 @@ fn handle_mouse(mouse: MouseEvent, session: &mut Session, drag: &mut DragState) 
     }
 }
 
-fn handle_action(
-    action: Action,
-    session: &mut Session,
-    running: &mut bool,
-    rows: u16,
-    cols: u16,
-) -> Result<()> {
+fn handle_action(action: Action, session: &mut Session, ui: &mut LocalUi) -> Result<()> {
     match action {
-        Action::Detach => *running = false,
+        Action::Detach => ui.running = false,
         Action::SplitHorizontal => {
             session.active_window().split_horizontal()?;
         }
@@ -196,7 +236,7 @@ fn handle_action(
         Action::ResizeRight => session.active_window().resize_pane(ResizeDir::Right),
         Action::ResizeUp => session.active_window().resize_pane(ResizeDir::Up),
         Action::ResizeDown => session.active_window().resize_pane(ResizeDir::Down),
-        Action::NewWindow => session.create_window(rows, cols)?,
+        Action::NewWindow => session.create_window(ui.rows, ui.cols)?,
         Action::NextWindow => session.next_window(),
         Action::PrevWindow => session.prev_window(),
         Action::SwitchWindow(n) => session.switch_to_window(n),
@@ -205,12 +245,25 @@ fn handle_action(
         Action::EnterScrollMode => session.enter_scroll_mode(),
         Action::ReloadConfig => {
             let path = crate::config::default_config_path();
-            use crate::tui::status_bar::StatusMessage;
-            match crate::config::settings::BmuxConfig::hot_reload(&path) {
-                Ok(_cfg) => session.set_status_flash(StatusMessage::ConfigReloaded),
-                Err(e) => session.set_status_flash(StatusMessage::ConfigError(e.to_string())),
+            match BmuxConfig::hot_reload(&path) {
+                Ok(cfg) => {
+                    apply_local_config(session, &cfg)?;
+                    ui.keybindings = KeybindingState::from_config(cfg.prefix_key());
+                    session.set_status_flash(StatusMessage::ConfigReloaded);
+                }
+                Err(e) => session.set_status_flash(StatusMessage::ConfigError(e)),
             }
         }
+        Action::RenameWindow => {
+            let current = session.active_window_name().to_string();
+            ui.prompt = Some(Prompt::with_text(PromptKind::RenameWindow, &current));
+        }
+        Action::SendTask | Action::SendTaskAuto => {
+            session.set_status_flash(StatusMessage::Custom(
+                "Agents run in sessions. Start one with `bmux new <name>`.".to_string(),
+            ));
+        }
+        Action::ShowHelp => ui.help = true,
     }
     Ok(())
 }

@@ -1,6 +1,6 @@
 // ShellAdapter — wraps a shell child process as a BMUX agent.
 //
-// Story 2.1: Validates the full agent lifecycle before AI-specific adapters are built.
+// Validates the full agent lifecycle before AI-specific adapters are built.
 // The shell process is spawned with stdin/stdout pipes for task I/O.
 
 use std::time::Instant;

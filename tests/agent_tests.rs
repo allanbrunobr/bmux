@@ -8,7 +8,7 @@ use bmux::agents::pi::PiAdapter;
 use bmux::agents::registry::{AgentInfo, AgentRegistry};
 use bmux::agents::shell::ShellAdapter;
 
-// ─── Story 2.1: AgentAdapter Trait & Shell Agent ───────────────────────────
+// ─── AgentAdapter Trait & Shell Agent ───────────────────────────
 
 #[test]
 fn test_agent_adapter_trait_methods_exist() {
@@ -66,7 +66,7 @@ async fn test_shell_adapter_send_task() {
     agent.kill().await.ok();
 }
 
-// ─── Story 2.1: AgentRegistry ──────────────────────────────────────────────
+// ─── AgentRegistry ──────────────────────────────────────────────
 
 #[test]
 fn test_agent_registry_new_is_empty() {
@@ -136,7 +136,7 @@ fn test_agent_registry_remove_nonexistent_errors() {
     assert!(err_msg.contains("nonexistent"));
 }
 
-// ─── Story 2.2: AI Agents ──────────────────────────────────────────────────
+// ─── AI Agents ──────────────────────────────────────────────────
 
 #[test]
 fn test_claude_code_adapter_type() {
@@ -177,7 +177,7 @@ async fn test_spawn_missing_binary_returns_error() {
     assert!(err_msg.contains("not found in PATH") || err_msg.contains("No such file"));
 }
 
-// ─── Story 2.3: Status Bar Data ────────────────────────────────────────────
+// ─── Status Bar Data ────────────────────────────────────────────
 
 #[test]
 fn test_agent_info_icon_for_types() {
@@ -235,7 +235,7 @@ fn test_registry_aggregate_stats() {
     assert!((stats.total_cost - 0.0035).abs() < 1e-6);
 }
 
-// ─── Story 2.4: Kill & Error Handling ──────────────────────────────────────
+// ─── Kill & Error Handling ──────────────────────────────────────
 
 #[test]
 fn test_kill_nonexistent_agent_error_message() {
@@ -244,7 +244,7 @@ fn test_kill_nonexistent_agent_error_message() {
     assert!(err.to_string().contains("nonexistent"));
 }
 
-// ─── Story 2.5: CustomAdapter ──────────────────────────────────────────────
+// ─── CustomAdapter ──────────────────────────────────────────────
 
 #[test]
 fn test_custom_adapter_type_and_icon() {
@@ -284,7 +284,7 @@ async fn test_custom_adapter_spawn_missing_binary_error() {
     assert!(result.is_err());
 }
 
-// ─── Story 2.6: Session Persistence ────────────────────────────────────────
+// ─── Session Persistence ────────────────────────────────────────
 
 #[test]
 fn test_agent_registry_serialize_deserialize() {

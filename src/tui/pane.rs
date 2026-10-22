@@ -41,10 +41,31 @@ pub struct Pane {
     scroll: Arc<Mutex<ScrollState>>,
 }
 
+/// Shell for new panes, set from config (`[tui] default_shell`).
+static DEFAULT_SHELL: std::sync::RwLock<Option<String>> = std::sync::RwLock::new(None);
+
+/// Set the shell used by new panes. `None` restores `$SHELL`.
+pub fn set_default_shell(shell: Option<String>) {
+    let shell = shell.filter(|s| !s.trim().is_empty());
+    if let Ok(mut guard) = DEFAULT_SHELL.write() {
+        *guard = shell;
+    }
+}
+
+/// Shell for new panes: configured shell, else `$SHELL`, else `/bin/sh`.
+pub fn default_shell() -> String {
+    DEFAULT_SHELL
+        .read()
+        .ok()
+        .and_then(|g| g.clone())
+        .or_else(|| std::env::var("SHELL").ok())
+        .unwrap_or_else(|| "/bin/sh".to_string())
+}
+
 impl Pane {
-    /// Spawn a new pane running `$SHELL` (or `/bin/sh` as fallback).
+    /// Spawn a new pane running the configured shell (see [`default_shell`]).
     pub fn new(id: usize, rows: u16, cols: u16) -> Result<Self> {
-        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
+        let shell = default_shell();
         Self::spawn_with_command(id, rows, cols, CommandBuilder::new(&shell), Vec::new())
     }
 

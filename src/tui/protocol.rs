@@ -26,6 +26,8 @@ pub enum ClientMessage {
     MouseDrag { col: u16, row: u16 },
     /// Mouse button released — end drag.
     MouseUp,
+    /// Rename the active window (`Ctrl-b ,`).
+    RenameWindow { name: String },
 
     // ── CLI query messages (non-TUI clients) ──────────────────────────────
     /// List all agents in this session.
@@ -70,6 +72,8 @@ pub enum ClientMessage {
     WorkflowRun { file: String, input: Option<String> },
     /// Get workflow run status by ID.
     WorkflowStatus { id: String },
+    /// Re-read config.toml in the running session (`bmux config reload`).
+    ConfigReload,
 }
 
 // ── Server → Client ───────────────────────────────────────────────────────────
@@ -98,6 +102,31 @@ pub struct SessionSnapshot {
     pub windows: Vec<WindowSnapshot>,
     #[serde(default)]
     pub status_message: Option<String>,
+    /// Agents running in this session, shown on the right of the status bar.
+    #[serde(default)]
+    pub agents: Vec<AgentBadge>,
+    /// `false` hides the status bar (`[tui] status_bar = false`).
+    #[serde(default = "default_true")]
+    pub status_bar: bool,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+/// Compact agent state for the status bar.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AgentBadge {
+    pub name: String,
+    pub agent_type: String,
+    pub model: String,
+    /// `idle`, `working`, `waiting` or `error: …`.
+    pub status: String,
+    pub tokens: u64,
+    pub cost_usd: f64,
+    /// `false` when the agent type does not report usage.
+    pub cost_tracked: bool,
+    pub pane_id: Option<usize>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

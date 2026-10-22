@@ -143,7 +143,7 @@ impl TaskRouter {
     }
 
     // -----------------------------------------------------------------------
-    // Story 3.2 — Send Task to Specific Agent
+    // Send Task to Specific Agent
     // -----------------------------------------------------------------------
 
     /// Send a task to a specific agent by name.
@@ -188,7 +188,7 @@ impl TaskRouter {
     }
 
     // -----------------------------------------------------------------------
-    // Story 3.3 — Task Queue, List & Cancel
+    // Task Queue, List & Cancel
     // -----------------------------------------------------------------------
 
     /// List all tasks.
@@ -273,7 +273,7 @@ impl TaskRouter {
     }
 
     // -----------------------------------------------------------------------
-    // Story 3.4 — Auto-Route Tasks by Cost & Capability
+    // Auto-Route Tasks by Cost & Capability
     // -----------------------------------------------------------------------
 
     /// Auto-route a task to the best available agent using the scoring formula:
@@ -416,7 +416,7 @@ impl TaskRouter {
     }
 
     // -----------------------------------------------------------------------
-    // Story 3.5 — Agent Publishes Task Results
+    // Agent Publishes Task Results
     // -----------------------------------------------------------------------
 
     /// Handle a result published by an agent (via IPC Result message).
@@ -490,6 +490,16 @@ impl TaskRouter {
         for (id, _) in by_time.into_iter().take(remove_count) {
             tasks.remove(&id);
         }
+    }
+
+    /// Full ID of the task the agent is working on, if any.
+    pub async fn active_task_full_id(&self, agent_id: &str) -> Option<String> {
+        let tasks = self.tasks.read().await;
+        tasks
+            .values()
+            .filter(|t| t.destination == agent_id && t.status == TaskStatus::Active)
+            .min_by_key(|t| t.submitted_at)
+            .map(|t| t.full_id.clone())
     }
 
     /// Mark the agent's active task failed when PTY delivery fails; return agent to Idle.
@@ -706,7 +716,7 @@ impl TaskRouter {
 }
 
 // ---------------------------------------------------------------------------
-// Scoring algorithm (Story 3.4)
+// Scoring algorithm
 // ---------------------------------------------------------------------------
 
 fn compute_score(
@@ -822,7 +832,7 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // Story 3.2: Send Task to Specific Agent
+    // Send Task to Specific Agent
     // -----------------------------------------------------------------------
 
     #[tokio::test]
@@ -901,7 +911,7 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // Story 3.3: Task Queue, List & Cancel
+    // Task Queue, List & Cancel
     // -----------------------------------------------------------------------
 
     #[tokio::test]
@@ -1011,7 +1021,7 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // Story 3.4: Auto-Route by Cost & Capability
+    // Auto-Route by Cost & Capability
     // -----------------------------------------------------------------------
 
     #[tokio::test]
@@ -1142,7 +1152,7 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // Story 3.5: Agent Publishes Task Results
+    // Agent Publishes Task Results
     // -----------------------------------------------------------------------
 
     #[tokio::test]

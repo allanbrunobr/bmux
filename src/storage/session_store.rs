@@ -3,8 +3,6 @@
 /// The ContextStore already persists to disk via sled, so context survives
 /// detach/reattach automatically. This module manages the session registry
 /// (session metadata) and drives context cleanup on kill.
-///
-/// Story: 4.3
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -108,7 +106,7 @@ impl SessionStore {
         Ok(())
     }
 
-    /// Terminate a session and remove all its context entries (Story 4.3).
+    /// Terminate a session and remove all its context entries.
     pub fn kill(&self, session_id: &str) -> Result<usize> {
         if let Some(mut meta) = self.get_meta(session_id)? {
             meta.state = SessionState::Terminated;
@@ -163,7 +161,7 @@ mod tests {
         (store, dir)
     }
 
-    // ── Story 4.3: session persistence ──────────────────────────────────────
+    // ── session persistence ──────────────────────────────────────
 
     #[serial]
     #[test]
