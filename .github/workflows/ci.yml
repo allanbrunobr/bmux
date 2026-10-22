@@ -1,8 +1,8 @@
 # .github/workflows/ci.yml — Continuous Integration
-# Story 7.1: Cargo Install & CI Build Pipeline
 #
-# Runs on every push and pull request:
-#   - Build + test on all 4 target platforms (via cross)
+# Runs on pushes and pull requests to main:
+#   - Build + test on Linux and macOS
+#   - Cross-compile check for the 4 release targets
 #   - Clippy lints
 #   - rustfmt check
 
