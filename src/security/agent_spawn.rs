@@ -194,8 +194,9 @@ fn wrap_sandbox(
             return wrap_with_bwrap(envelope, inner);
         }
         warn!(
+            agent = %agent_name,
             sandbox = %envelope.security.sandbox,
-            "bwrap not found; spawning with env -i only (no Landlock in child)"
+            "bwrap not found; spawning the agent without a sandbox (install bubblewrap)"
         );
         inner
     }
@@ -207,27 +208,53 @@ fn wrap_sandbox(
     }
 }
 
+/// Run the agent under bubblewrap with the same policy as the macOS profile:
+/// the system is read-only, and the agent can write only to the project, temp
+/// dirs and its own state dirs. Network stays available for the model API.
 #[cfg(target_os = "linux")]
 fn wrap_with_bwrap(envelope: &SecurityEnvelope, inner: CommandBuilder) -> CommandBuilder {
-    let project = envelope.project_dir.display().to_string();
+    use crate::security::sandbox::{AGENT_HIDDEN_HOME_DIRS, AGENT_WRITABLE_HOME_DIRS};
+
     let mut wrap = CommandBuilder::new("bwrap");
-    wrap.arg("--unshare-all");
-    wrap.arg("--die-with-parent");
-    wrap.arg("--new-session");
-    wrap.arg("--bind").arg(&project).arg(&project);
-    wrap.arg("--bind").arg("/tmp").arg("/tmp");
-    for sys in [
-        "/usr", "/lib", "/lib64", "/bin", "/sbin", "/etc", "/dev", "/proc",
-    ] {
-        if Path::new(sys).exists() {
-            if sys == "/dev" || sys == "/proc" {
-                wrap.arg("--dev-bind").arg(sys).arg(sys);
-            } else {
-                wrap.arg("--ro-bind").arg(sys).arg(sys);
+    let mut args: Vec<String> = vec![
+        "--unshare-all".into(),
+        "--share-net".into(),
+        "--die-with-parent".into(),
+        "--ro-bind".into(),
+        "/".into(),
+        "/".into(),
+        "--dev-bind".into(),
+        "/dev".into(),
+        "/dev".into(),
+        "--proc".into(),
+        "/proc".into(),
+        "--bind".into(),
+        "/tmp".into(),
+        "/tmp".into(),
+    ];
+    let mut bind_rw = |path: &Path| {
+        let p = path.display().to_string();
+        args.extend(["--bind-try".into(), p.clone(), p]);
+    };
+    if let Some(home) = dirs::home_dir() {
+        for dir in AGENT_WRITABLE_HOME_DIRS {
+            bind_rw(&home.join(dir));
+        }
+        bind_rw(&home.join(".claude.json"));
+        bind_rw(&envelope.project_dir);
+        for dir in AGENT_HIDDEN_HOME_DIRS {
+            let hidden = home.join(dir);
+            if hidden.exists() {
+                args.extend(["--tmpfs".into(), hidden.display().to_string()]);
             }
         }
+    } else {
+        bind_rw(&envelope.project_dir);
     }
-    wrap.arg("--");
+    args.push("--".into());
+    for arg in args {
+        wrap.arg(arg);
+    }
     for arg in inner.get_argv() {
         wrap.arg(arg);
     }

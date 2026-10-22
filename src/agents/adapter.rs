@@ -89,6 +89,8 @@ pub struct AgentOutput {
 ///
 /// Each adapter wraps a child process (PTY or pipe) and provides
 /// lifecycle management (spawn, kill) and task I/O (send_task, recv_output).
+// async_trait adds #[must_use] to methods that already return a must-use future.
+#[allow(clippy::double_must_use)]
 #[async_trait]
 pub trait AgentAdapter: Send + Sync {
     /// Unique name for this agent instance (e.g. "arch", "tests").

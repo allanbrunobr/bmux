@@ -36,7 +36,9 @@ binary = "pi"
 
 # ── Security ───────────────────────────────────────────────────────────────
 [security]
-# Filesystem sandbox for agents: landlock | namespace | seatbelt | none
+# Agent sandbox: Seatbelt on macOS, bubblewrap (bwrap) on Linux.
+# Agents can write only to the project, temp dirs and their own state dirs.
+# Any value except "none" enables it.
 sandbox = "landlock"
 # Opt-in only. Not recommended.
 allow_dangerous_permissions = false

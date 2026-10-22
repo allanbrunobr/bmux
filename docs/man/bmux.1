@@ -16,8 +16,8 @@ is a terminal multiplexer that adds first-class AI agent support to the
 familiar tmux-style workflow. It manages panes, windows, and sessions while
 simultaneously orchestrating Claude Code, OpenCode, Pi, Gemini, and custom
 CLI agents as child processes. Agents communicate via an authenticated Unix
-socket bus (HMAC-SHA256) and are sandboxed to the project directory using
-Landlock (Linux) or Seatbelt (macOS).
+socket bus (HMAC-SHA256) and run in a sandbox that limits file writes to
+the project directory (Seatbelt on macOS, bubblewrap on Linux).
 .\"
 .SH SUBCOMMANDS
 .\"
@@ -143,7 +143,7 @@ status_bar    = true
 default_type  = "claude-code"   # used when spawn gets no type
 
 [security]
-sandbox       = "landlock"   # landlock | namespace | seatbelt | none
+sandbox       = "landlock"   # any value except "none" enables it
 
 [audit]
 enabled       = true
@@ -215,20 +215,25 @@ bmux context dump > context-snapshot.json
 .\"
 .SH SECURITY
 .B bmux
-applies filesystem sandboxing to each agent process:
-.IP \(bu 2
-.B Linux 5.13+:
-Landlock ruleset restricting access to the project directory and
-.IR /tmp .
-.IP \(bu 2
-.B Linux < 5.13:
-Mount-namespace isolation (reduced protection; a warning is logged).
+starts each agent (except
+.B shell
+panes) in a sandbox. The agent can read the system and use the network, but
+it can write only to the project directory, temporary directories and its own
+state directories (for example
+.IR ~/.claude ).
+It cannot read or write
+.IR ~/.config/bmux .
 .IP \(bu 2
 .B macOS:
-Seatbelt (sandbox_init) with a generated SBPL profile.
+.BR sandbox-exec (1)
+with a generated Seatbelt profile.
+.IP \(bu 2
+.B Linux:
+.BR bwrap (1)
+(bubblewrap) when it is installed. Without it, agents run unsandboxed and a
+warning is logged.
 .PP
-Disable sandboxing with \fBsandbox = "none"\fR in config (not recommended;
-a warning is logged at startup).
+Disable the sandbox with \fBsandbox = "none"\fR (not recommended).
 .\"
 .SH EXIT STATUS
 .TP

@@ -107,7 +107,7 @@ fn apply_platform_sandbox(
 /// Check whether the running kernel supports Landlock (>= 5.13).
 #[cfg(target_os = "linux")]
 pub fn is_landlock_supported() -> bool {
-    use landlock::ABI;
+    use landlock::{Access, RulesetAttr, ABI};
     // Attempting to use V1 (5.13 minimum); if it errors the kernel is too old.
     landlock::Ruleset::default()
         .handle_access(landlock::AccessFs::from_all(ABI::V1))
@@ -125,6 +125,8 @@ fn apply_landlock(project_dir: &Path) -> Result<(), SandboxError> {
     use landlock::{
         path_beneath_rules, Access, AccessFs, Ruleset, RulesetAttr, RulesetCreatedAttr, ABI,
     };
+
+    use std::path::PathBuf;
 
     let abi = ABI::V3;
     let rw_access = AccessFs::from_all(abi);
@@ -223,50 +225,98 @@ fn apply_seatbelt(project_dir: &Path) -> Result<(), SandboxError> {
     Ok(())
 }
 
-/// Build a Sandbox Profile Language (SBPL) profile that:
-///   - Denies everything by default
-///   - Allows read on system paths
-///   - Allows read+write inside project_dir and /tmp
+/// Directories under `$HOME` that agents may write to: their own state, logs
+/// and caches. Everything else outside the project and temp dirs is read-only.
+pub const AGENT_WRITABLE_HOME_DIRS: &[&str] = &[
+    ".claude",
+    ".config/opencode",
+    ".local/share/opencode",
+    ".local/state/opencode",
+    ".pi",
+    ".gemini",
+    ".cache",
+    ".npm",
+    "Library/Caches",
+];
+
+/// Directories under `$HOME` that agents may not read or write: BMUX's own
+/// configuration and secrets.
+pub const AGENT_HIDDEN_HOME_DIRS: &[&str] = &[".config/bmux"];
+
+fn sbpl_string(path: &Path) -> String {
+    path.display()
+        .to_string()
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"")
+}
+
+fn sbpl_regex_literal(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for c in text.chars() {
+        if "\\.^$|?*+()[]{}\"".contains(c) {
+            out.push('\\');
+        }
+        out.push(c);
+    }
+    out
+}
+
+/// Build the Sandbox Profile Language (SBPL) profile for an agent.
+///
+/// Agents are full programs (Node runtimes, git, compilers) that need to read
+/// the system and reach their model API, so the profile does not deny reads or
+/// network. It denies file writes, except in:
+///   - `project_dir`
+///   - temp dirs (`/tmp`, `/private/var/folders`) and `/dev` (the agent's PTY)
+///   - the agent state dirs in [`AGENT_WRITABLE_HOME_DIRS`] and `~/.claude.json*`
+///
+/// It also denies reads and writes in [`AGENT_HIDDEN_HOME_DIRS`].
 #[cfg(target_os = "macos")]
 pub fn build_seatbelt_profile(project_dir: &Path) -> String {
-    let project_dir = project_dir.display();
-    format!(
-        r#"(version 1)
-(deny default)
+    build_seatbelt_profile_for_home(project_dir, dirs::home_dir().as_deref())
+}
 
-; Allow process execution
-(allow process-exec*)
-(allow process-fork)
+/// Same as [`build_seatbelt_profile`] with an explicit home directory.
+pub fn build_seatbelt_profile_for_home(project_dir: &Path, home: Option<&Path>) -> String {
+    // Seatbelt matches resolved paths (/tmp is /private/tmp on macOS).
+    let project_dir = std::fs::canonicalize(project_dir).unwrap_or_else(|_| project_dir.into());
+    let project_dir = project_dir.as_path();
+    let mut writable = vec![
+        format!("  (subpath \"{}\")", sbpl_string(project_dir)),
+        "  (subpath \"/dev\")".to_string(),
+        "  (subpath \"/tmp\")".to_string(),
+        "  (subpath \"/private/tmp\")".to_string(),
+        "  (subpath \"/private/var/folders\")".to_string(),
+    ];
+    let mut hidden = Vec::new();
+    if let Some(home) = home {
+        for dir in AGENT_WRITABLE_HOME_DIRS {
+            writable.push(format!("  (subpath \"{}\")", sbpl_string(&home.join(dir))));
+        }
+        writable.push(format!(
+            "  (regex #\"^{}/\\.claude\\.json\")",
+            sbpl_regex_literal(&home.display().to_string())
+        ));
+        for dir in AGENT_HIDDEN_HOME_DIRS {
+            hidden.push(format!("  (subpath \"{}\")", sbpl_string(&home.join(dir))));
+        }
+    }
 
-; Allow signals
-(allow signal (target self))
-
-; System read-only paths
-(allow file-read*
-  (subpath "/usr")
-  (subpath "/System")
-  (subpath "/Library/Frameworks")
-  (subpath "/private/var/db")
-  (literal "/dev/null")
-  (literal "/dev/random")
-  (literal "/dev/urandom")
-  (literal "/dev/zero")
-)
-
-; Project directory — full read/write
-(allow file-read* file-write*
-  (subpath "{project_dir}")
-)
-
-; /tmp — write allowed for IPC socket files (bmux-*)
-(allow file-read* file-write*
-  (subpath "/tmp")
-  (subpath "/private/tmp")
-)
-
-; Network — denied by default (agents use local IPC only)
-"#
-    )
+    let mut profile = String::from(
+        "(version 1)\n\
+         ; BMUX agent sandbox: read and network allowed, writes limited.\n\
+         (allow default)\n\
+         (deny file-write*)\n",
+    );
+    profile.push_str("(allow file-write*\n");
+    profile.push_str(&writable.join("\n"));
+    profile.push_str("\n)\n");
+    if !hidden.is_empty() {
+        profile.push_str("; BMUX configuration and secrets\n(deny file-read* file-write*\n");
+        profile.push_str(&hidden.join("\n"));
+        profile.push_str("\n)\n");
+    }
+    profile
 }
 
 // ─── Non-Linux/macOS fallback ──────────────────────────────────────────────────
@@ -358,16 +408,29 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let profile = build_seatbelt_profile(dir.path());
         assert!(profile.contains(&dir.path().display().to_string()));
-        assert!(profile.contains("(deny default)"));
+        assert!(profile.contains("(deny file-write*)"));
         assert!(profile.contains("/tmp"));
     }
 
     #[cfg(target_os = "macos")]
     #[test]
-    fn test_seatbelt_profile_denies_by_default() {
+    fn test_seatbelt_profile_denies_writes_by_default() {
         let dir = TempDir::new().unwrap();
         let profile = build_seatbelt_profile(dir.path());
         assert!(profile.starts_with("(version 1)"));
-        assert!(profile.contains("(deny default)"));
+        assert!(profile.contains("(deny file-write*)"));
+    }
+
+    #[test]
+    fn test_seatbelt_profile_home_dirs() {
+        let profile = build_seatbelt_profile_for_home(
+            Path::new("/work/my \"proj\""),
+            Some(Path::new("/Users/a.b")),
+        );
+        assert!(profile.contains("(subpath \"/work/my \\\"proj\\\"\")"));
+        assert!(profile.contains("(subpath \"/Users/a.b/.claude\")"));
+        assert!(profile.contains("(regex #\"^/Users/a\\.b/\\.claude\\.json\")"));
+        assert!(profile
+            .contains("(deny file-read* file-write*\n  (subpath \"/Users/a.b/.config/bmux\")"));
     }
 }
