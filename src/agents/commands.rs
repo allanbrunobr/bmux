@@ -359,7 +359,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_handle_spawn_unknown_type_fails() {
-        let mut registry = AgentRegistry::new();
         let config = AgentConfig {
             binary: "some-binary".to_string(),
             model: "some-model".to_string(),
