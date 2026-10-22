@@ -2,8 +2,6 @@ use crate::security::agent_spawn::AgentPtySpawn;
 use anyhow::Result;
 use ratatui::{buffer::Buffer, layout::Rect};
 
-use ratatui::widgets::Widget;
-
 use super::{
     layout::{Layout, ResizeDir},
     pane::Pane,
@@ -288,16 +286,18 @@ impl Window {
 
     // ── Rendering ─────────────────────────────────────────────────────────────
 
-    /// Render all panes into the frame buffer.
-    pub fn render(&mut self, buf: &mut Buffer, area: Rect) {
+    /// Render all panes into the frame buffer. Returns the terminal cursor
+    /// position of the focused pane when its application shows a cursor.
+    pub fn render(&mut self, buf: &mut Buffer, area: Rect) -> Option<(u16, u16)> {
         use ratatui::style::{Color, Style};
 
         self.last_area = area;
+        let mut cursor = None;
 
         if self.zoom.is_zoomed() {
             let pane_id = self.zoom.zoomed_pane_id().unwrap_or(self.focused_pane);
             if let Some(pane) = self.pane_ref(pane_id) {
-                pane.view(true).render(area, buf);
+                cursor = pane.render_framed(area, buf, true);
             }
         } else {
             let rects = self.layout.compute_rects(area);
@@ -307,7 +307,10 @@ impl Window {
                 }
                 let focused = *pane_id == self.focused_pane;
                 if let Some(pane) = self.pane_ref(*pane_id) {
-                    pane.view(focused).render(*rect, buf);
+                    let pos = pane.render_framed(*rect, buf, focused);
+                    if focused {
+                        cursor = pos;
+                    }
                 }
             }
         }
@@ -329,6 +332,7 @@ impl Window {
                 }
             }
         }
+        cursor
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

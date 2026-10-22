@@ -84,12 +84,12 @@ pub fn sign_server(auth: &SessionAuth, msg: ServerMessage) -> Result<SignedServe
     })
 }
 
-pub fn verify_server(auth: &SessionAuth, frame: &SignedServerFrame) -> Result<ServerMessage> {
+pub fn verify_server(auth: &SessionAuth, frame: SignedServerFrame) -> Result<ServerMessage> {
     let bytes = server_signable(&frame.msg)?;
     let tag = hex::decode(&frame.hmac).map_err(|e| anyhow!("invalid server hmac hex: {e}"))?;
     hmac::verify_message(auth.key_bytes(), &bytes, &tag)
         .map_err(|_| anyhow!("server HMAC verification failed"))?;
-    Ok(frame.msg.clone())
+    Ok(frame.msg)
 }
 
 #[cfg(test)]
@@ -149,6 +149,54 @@ mod tests {
         let signed = sign_server(&auth, ServerMessage::State(snap)).unwrap();
         let wire = serde_json::to_string(&signed).unwrap();
         let received: SignedServerFrame = serde_json::from_str(&wire).unwrap();
-        assert!(verify_server(&auth, &received).is_ok());
+        assert!(verify_server(&auth, received).is_ok());
+    }
+
+    /// Cells skip default fields on the wire. A signed frame with blank,
+    /// styled, wide and combining cells must still verify after JSON.
+    #[test]
+    fn server_state_with_cells_survives_json() {
+        use crate::tui::pane::snapshot_screen;
+        use crate::tui::protocol::{PaneLayout, SessionSnapshot, WindowSnapshot};
+        let mut parser = vt100::Parser::new(3, 12, 0);
+        parser.process(
+            "\x1b[1;3;4;7mA\x1b[0m \x1b[38;5;196mB\x1b[38;2;1;2;3;48;5;17mC\x1b[0m界e\u{301}\"\\\x1b[?25l"
+                .as_bytes(),
+        );
+        let pane = snapshot_screen(7, parser.screen());
+        assert!(pane.cells[0].iter().any(|c| c.wide_cont));
+        let snap = SessionSnapshot {
+            name: "s".to_string(),
+            active_window: 0,
+            windows: vec![WindowSnapshot {
+                id: 0,
+                name: "w".to_string(),
+                pane_layouts: vec![PaneLayout {
+                    id: 7,
+                    x: 0,
+                    y: 0,
+                    width: 14,
+                    height: 5,
+                }],
+                pane_cells: vec![pane],
+                focused_pane: 7,
+                zoomed: false,
+                scroll_active: false,
+            }],
+            status_message: None,
+            agents: Vec::new(),
+            status_bar: true,
+        };
+        let auth = SessionAuth::generate().unwrap();
+        let signed = sign_server(&auth, ServerMessage::State(snap.clone())).unwrap();
+        let wire = serde_json::to_string(&signed).unwrap();
+        let received: SignedServerFrame = serde_json::from_str(&wire).unwrap();
+        match verify_server(&auth, received).unwrap() {
+            ServerMessage::State(back) => assert_eq!(
+                serde_json::to_string(&back).unwrap(),
+                serde_json::to_string(&snap).unwrap()
+            ),
+            other => panic!("unexpected message {other:?}"),
+        }
     }
 }

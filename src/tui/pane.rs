@@ -7,15 +7,11 @@ type RawFd = i32;
 
 use super::pty_spawn;
 use super::{
-    protocol::{CellData, PaneSnapshot},
+    chrome::{cursor_position, pane_block, render_pane_cells},
+    protocol::{CellColor, CellData, PaneSnapshot},
     scroll::ScrollState,
 };
-use ratatui::{
-    buffer::Buffer,
-    layout::Rect,
-    style::{Color, Modifier, Style},
-    widgets::{Block, Borders, Widget},
-};
+use ratatui::{buffer::Buffer, layout::Rect, widgets::Widget};
 use std::{
     io::Write,
     sync::{
@@ -217,62 +213,23 @@ impl Pane {
         }
     }
 
-    /// Render screen content into an already-computed inner rect (no borders).
-    pub fn render_content(&self, buf: &mut Buffer, inner: Rect) {
-        if self.scroll.lock().unwrap().is_active() {
-            self.render_scroll_content(buf, inner);
-            return;
-        }
-        let parser = self.parser.lock().unwrap();
-        let screen = parser.screen();
-        let (rows, cols) = screen.size();
+    /// Render screen content into an already-computed inner rect (no
+    /// borders). Returns the absolute terminal cursor position when the
+    /// application shows its cursor (never in scroll mode).
+    pub fn render_content(&self, buf: &mut Buffer, inner: Rect) -> Option<(u16, u16)> {
+        let snap = self.snapshot();
+        let inner = inner.intersection(buf.area);
+        render_pane_cells(buf, inner, &snap);
+        cursor_position(inner, &snap)
+    }
 
-        for row in 0..rows.min(inner.height) {
-            for col in 0..cols.min(inner.width) {
-                let x = inner.x + col;
-                let y = inner.y + row;
-
-                if let Some(cell) = screen.cell(row, col) {
-                    let content = cell.contents();
-                    let text = if content.is_empty() { " " } else { &content };
-                    let fg = vt100_color(cell.fgcolor());
-                    let bg = vt100_color(cell.bgcolor());
-                    let mut style = Style::default().fg(fg).bg(bg);
-                    if cell.bold() {
-                        style = style.add_modifier(Modifier::BOLD);
-                    }
-                    if cell.italic() {
-                        style = style.add_modifier(Modifier::ITALIC);
-                    }
-                    if cell.underline() {
-                        style = style.add_modifier(Modifier::UNDERLINED);
-                    }
-                    buf.set_string(x, y, text, style);
-                } else {
-                    buf.set_string(x, y, " ", Style::default());
-                }
-            }
-        }
-
-        // Render cursor as reversed cell
-        let (cur_row, cur_col) = screen.cursor_position();
-        let cx = inner.x + cur_col;
-        let cy = inner.y + cur_row;
-        if cx < inner.x + inner.width && cy < inner.y + inner.height {
-            if let Some(cell) = screen.cell(cur_row, cur_col) {
-                let content = cell.contents();
-                let text = if content.is_empty() { " " } else { &content };
-                buf.set_string(
-                    cx,
-                    cy,
-                    text,
-                    Style::default()
-                        .fg(Color::Black)
-                        .bg(Color::White)
-                        .add_modifier(Modifier::BOLD),
-                );
-            }
-        }
+    /// Draw the rounded border and the content. Returns the cursor position
+    /// (see [`Pane::render_content`]).
+    pub fn render_framed(&self, area: Rect, buf: &mut Buffer, focused: bool) -> Option<(u16, u16)> {
+        let block = pane_block(focused);
+        let inner = block.inner(area);
+        block.render(area, buf);
+        self.render_content(buf, inner)
     }
 }
 
@@ -284,98 +241,38 @@ pub struct PaneView<'a> {
 
 impl Widget for PaneView<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
-        // Border — active pane gets a yellow highlight
-        let border_style = if self.focused {
-            Style::default().fg(Color::Yellow)
-        } else {
-            Style::default().fg(Color::DarkGray)
-        };
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .border_style(border_style);
-
-        let inner = block.inner(area);
-        block.render(area, buf);
-
-        self.pane.render_content(buf, inner);
+        self.pane.render_framed(area, buf, self.focused);
     }
 }
 
 impl Pane {
-    fn render_scroll_content(&self, buf: &mut Buffer, inner: Rect) {
-        let scroll = self.scroll.lock().unwrap();
-        let lines = scroll.visible_lines(inner.height as usize);
-        for (row, line) in lines.iter().enumerate() {
-            let y = inner.y + row as u16;
-            if y >= inner.y + inner.height {
-                break;
-            }
-            for (col, ch) in line.chars().take(inner.width as usize).enumerate() {
-                buf.set_string(inner.x + col as u16, y, ch.to_string(), Style::default());
-            }
-        }
-    }
-
     /// Capture a serializable snapshot of the current screen state.
     pub fn snapshot(&self) -> PaneSnapshot {
         if self.scroll.lock().unwrap().is_active() {
             return self.snapshot_scroll();
         }
         let parser = self.parser.lock().unwrap();
-        let screen = parser.screen();
-        let (rows, cols) = screen.size();
-        let (cursor_row, cursor_col) = screen.cursor_position();
-        let mut cells = Vec::with_capacity(rows as usize);
-        for r in 0..rows {
-            let mut row_cells = Vec::with_capacity(cols as usize);
-            for c in 0..cols {
-                if let Some(cell) = screen.cell(r, c) {
-                    let contents = cell.contents();
-                    let ch = contents.chars().next().unwrap_or(' ');
-                    let (fg_r, fg_g, fg_b) = vt100_color_rgb(cell.fgcolor());
-                    let (bg_r, bg_g, bg_b) = vt100_color_rgb(cell.bgcolor());
-                    row_cells.push(CellData {
-                        ch,
-                        fg_r,
-                        fg_g,
-                        fg_b,
-                        bg_r,
-                        bg_g,
-                        bg_b,
-                        bold: cell.bold(),
-                    });
-                } else {
-                    row_cells.push(CellData::default());
-                }
-            }
-            cells.push(row_cells);
-        }
-        PaneSnapshot {
-            id: self.id,
-            rows,
-            cols,
-            cells,
-            cursor_row,
-            cursor_col,
-        }
+        snapshot_screen(self.id, parser.screen())
     }
 
+    /// Snapshot of the scroll-back view, sized like the live screen.
     fn snapshot_scroll(&self) -> PaneSnapshot {
+        let (rows, cols) = self.parser.lock().unwrap().screen().size();
         let scroll = self.scroll.lock().unwrap();
-        let rows = 24u16;
-        let cols = 80u16;
         let lines = scroll.visible_lines(rows as usize);
         let mut cells = Vec::with_capacity(rows as usize);
-        for r in 0..rows {
-            let mut row_cells = Vec::with_capacity(cols as usize);
-            let line = lines.get(r as usize).copied().unwrap_or("");
-            for c in 0..cols {
-                let ch = line.chars().nth(c as usize).unwrap_or(' ');
-                row_cells.push(CellData {
-                    ch,
-                    ..CellData::default()
-                });
-            }
+        for r in 0..rows as usize {
+            let line = lines.get(r).copied().unwrap_or("");
+            let mut chars = line.chars();
+            let row_cells = (0..cols)
+                .map(|_| match chars.next() {
+                    Some(ch) if !ch.is_control() => CellData {
+                        ch: ch.to_string(),
+                        ..CellData::default()
+                    },
+                    _ => CellData::default(),
+                })
+                .collect();
             cells.push(row_cells);
         }
         PaneSnapshot {
@@ -385,47 +282,128 @@ impl Pane {
             cells,
             cursor_row: 0,
             cursor_col: 0,
+            cursor_visible: false,
         }
     }
 } // end impl Pane (snapshot)
 
-// ── Color conversion ──────────────────────────────────────────────────────────
-
-fn vt100_color_rgb(c: vt100::Color) -> (u8, u8, u8) {
-    match c {
-        vt100::Color::Default => (0, 0, 0),
-        vt100::Color::Idx(i) => indexed_to_rgb(i),
-        vt100::Color::Rgb(r, g, b) => (r, g, b),
+/// Build a snapshot from a vt100 screen (colours and attributes kept 1:1).
+pub fn snapshot_screen(id: usize, screen: &vt100::Screen) -> PaneSnapshot {
+    let (rows, cols) = screen.size();
+    let (cursor_row, cursor_col) = screen.cursor_position();
+    let mut cells = Vec::with_capacity(rows as usize);
+    for r in 0..rows {
+        let mut row_cells = Vec::with_capacity(cols as usize);
+        for c in 0..cols {
+            row_cells.push(screen.cell(r, c).map(cell_data).unwrap_or_default());
+        }
+        cells.push(row_cells);
+    }
+    PaneSnapshot {
+        id,
+        rows,
+        cols,
+        cells,
+        cursor_row,
+        cursor_col,
+        cursor_visible: !screen.hide_cursor(),
     }
 }
 
-fn indexed_to_rgb(idx: u8) -> (u8, u8, u8) {
-    // Basic 16-color approximation; good enough for snapshot serialization
-    match idx {
-        0 => (0, 0, 0),
-        1 => (128, 0, 0),
-        2 => (0, 128, 0),
-        3 => (128, 128, 0),
-        4 => (0, 0, 128),
-        5 => (128, 0, 128),
-        6 => (0, 128, 128),
-        7 => (192, 192, 192),
-        8 => (128, 128, 128),
-        9 => (255, 0, 0),
-        10 => (0, 255, 0),
-        11 => (255, 255, 0),
-        12 => (0, 0, 255),
-        13 => (255, 0, 255),
-        14 => (0, 255, 255),
-        15 => (255, 255, 255),
-        _ => (128, 128, 128),
+fn cell_data(cell: &vt100::Cell) -> CellData {
+    let contents = cell.contents();
+    CellData {
+        ch: if contents.is_empty() {
+            " ".to_string()
+        } else {
+            contents
+        },
+        fg: cell_color(cell.fgcolor()),
+        bg: cell_color(cell.bgcolor()),
+        bold: cell.bold(),
+        italic: cell.italic(),
+        underline: cell.underline(),
+        inverse: cell.inverse(),
+        wide_cont: cell.is_wide_continuation(),
     }
 }
 
-fn vt100_color(c: vt100::Color) -> Color {
+fn cell_color(c: vt100::Color) -> CellColor {
     match c {
-        vt100::Color::Default => Color::Reset,
-        vt100::Color::Idx(i) => Color::Indexed(i),
-        vt100::Color::Rgb(r, g, b) => Color::Rgb(r, g, b),
+        vt100::Color::Default => CellColor::Default,
+        vt100::Color::Idx(i) => CellColor::Idx(i),
+        vt100::Color::Rgb(r, g, b) => CellColor::Rgb(r, g, b),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn snap_of(input: &[u8]) -> PaneSnapshot {
+        let mut parser = vt100::Parser::new(4, 10, 0);
+        parser.process(input);
+        snapshot_screen(7, parser.screen())
+    }
+
+    #[test]
+    fn indexed_256_colour_is_kept() {
+        let s = snap_of(b"\x1b[38;5;196mX");
+        assert_eq!(s.cells[0][0].ch, "X");
+        assert_eq!(s.cells[0][0].fg, CellColor::Idx(196));
+    }
+
+    #[test]
+    fn rgb_colour_is_kept() {
+        let s = snap_of(b"\x1b[38;2;1;2;3mX");
+        assert_eq!(s.cells[0][0].fg, CellColor::Rgb(1, 2, 3));
+    }
+
+    #[test]
+    fn explicit_black_is_not_default() {
+        let s = snap_of(b"\x1b[30mX\x1b[0mY");
+        assert_eq!(s.cells[0][0].fg, CellColor::Idx(0));
+        assert_eq!(s.cells[0][1].fg, CellColor::Default);
+    }
+
+    #[test]
+    fn inverse_italic_underline_are_kept() {
+        let s = snap_of(b"\x1b[7mA\x1b[0;3mB\x1b[0;4mC");
+        assert!(s.cells[0][0].inverse);
+        assert!(s.cells[0][1].italic);
+        assert!(s.cells[0][2].underline);
+        assert!(!s.cells[0][2].inverse);
+    }
+
+    #[test]
+    fn cursor_visibility_follows_the_application() {
+        let s = snap_of(b"ab");
+        assert!(s.cursor_visible);
+        assert_eq!((s.cursor_row, s.cursor_col), (0, 2));
+        let s = snap_of(b"\x1b[?25l");
+        assert!(!s.cursor_visible);
+    }
+
+    #[test]
+    fn wide_char_marks_continuation_cell() {
+        let s = snap_of("界x".as_bytes());
+        assert_eq!(s.cells[0][0].ch, "界");
+        assert!(!s.cells[0][0].wide_cont);
+        assert!(s.cells[0][1].wide_cont);
+        assert_eq!(s.cells[0][2].ch, "x");
+    }
+
+    #[test]
+    fn combining_grapheme_is_not_truncated() {
+        let s = snap_of("e\u{301}".as_bytes());
+        assert_eq!(s.cells[0][0].ch, "e\u{301}");
+    }
+
+    #[test]
+    fn empty_cells_are_default() {
+        let s = snap_of(b"");
+        assert_eq!(s.rows, 4);
+        assert_eq!(s.cols, 10);
+        assert_eq!(s.cells[3][9], CellData::default());
     }
 }

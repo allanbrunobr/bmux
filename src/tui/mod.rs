@@ -1,3 +1,4 @@
+pub mod chrome;
 pub mod client;
 pub mod ipc_client;
 pub mod keybindings;
@@ -111,8 +112,13 @@ pub async fn run_local(session_name: &str) -> Result<()> {
             _ = render_ticker.tick() => {
                 session.expire_status_flash();
                 let prefix_label = ui.keybindings.prefix().label();
+                let prefix_active = ui.keybindings.is_prefix_active();
+                let overlay_open = ui.prompt.is_some() || ui.help;
                 terminal.draw(|f| {
-                    session.render(f);
+                    let cursor = session.render(f, prefix_active, &prefix_label);
+                    if let (Some((x, y)), false) = (cursor, overlay_open) {
+                        f.set_cursor_position((x, y));
+                    }
                     let area = f.area();
                     if let Some(prompt) = &ui.prompt {
                         let row = Rect::new(area.x, area.bottom().saturating_sub(1), area.width, 1);
