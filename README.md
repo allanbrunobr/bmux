@@ -8,6 +8,12 @@ A terminal multiplexer for running AI coding agents side by side.
 
 BMUX works like tmux: sessions, windows, panes, detach and attach. It also knows which panes run agents. You can send them tasks from the command line or from the keyboard, queue work per agent, share context between agents, chain agents in YAML workflows and see what each agent costs on the status bar.
 
+![How BMUX works: start a session, spawn two Claude Code agents in panes, send each one a task, watch per-agent cost on the status bar, chain both agents in a YAML workflow, then detach while the agents keep working](docs/images/bmux-how-it-works.gif)
+
+<sub>How a session works, as an animation: the commands are real, the agent output and costs are illustrative. [MP4 version](docs/images/bmux-how-it-works.mp4).</sub>
+
+**The real TUI:**
+
 ![A BMUX session: a shell and two agents, with per-agent cost on the status bar](docs/images/bmux-session.png)
 
 <sub>A shell pane and two agent panes. The agents in this screenshot are a scripted stand-in that writes Claude Code transcripts, so the costs are illustrative. With Claude Code, BMUX reads the same transcripts.</sub>
